@@ -1,6 +1,6 @@
 # 교내 동승 매칭 웹앱 — Architecture
 
-문서 버전: 0.7 · 기준일: 2026-10-28 · 상태: P1~P4 구현, P5 위치 공유·가상 위치도 및 P6 로컬 구현, staging D1/Worker 연결; 정책 문안 4종은 검토용 초안이며 위치 제공 통지·법률·보관 설정이 미확정이라 staging API는 닫혀 있고 실제 지도·실기기 검증 대기
+문서 버전: 0.7 · 기준일: 2026-10-28 · 상태: P1~P4 구현, P5 위치 공유·가상 위치도·위치 표본 제공 내역 로컬 알림/기록 및 P6 로컬 구현, staging D1/Worker 연결; 정책 문안 4종은 검토용 초안이며 위치정보 적용·통지 요건·보관 설정이 미확정이라 staging API는 닫혀 있고 실제 지도·실기기 검증 대기
 
 제품 범위는 [Project.md](Project.md), 작업 순서는 [Roadmap.md](Roadmap.md), 에이전트 지침은 [AGENTS.md](AGENTS.md)를 따른다. P1의 테이블·인덱스·로컬 실행과 health API, P2의 OIDC·세션·프로필·학생 확인·정책 동의, P3의 운전자 프로필·운행/요청 수명주기와 만료 Cron, P4의 추천 검색·학과 순위·성별/그룹 조건, P5의 로컬 위치 공유 핵심 흐름과 가상 위치도, P6의 신고·차단·계정 제한·학생 자격 만료·운영 UI·동의 관리·계정 탈퇴 1차 흐름과 기본 보안 헤더를 구현했다. 지도 공급자·실제 위치 정책·모바일 실기기는 미확정/미검증이고, 데이터 보관기간·복구 정책과 추가 운영 도구는 남아 있다. 현재 구현 범위와 실행 절차는 §14~30에 기록한다. 공식 플랫폼 문서로 확인한 기능과 이 서비스의 설계 기본값을 구분한다.
 
@@ -136,6 +136,7 @@ type DepartmentParseResult = {
 | `ride_requests` | id, trip_id, rider_id, desired_departure_at, gender_snapshot, gender_filter, department_id_snapshot, department_verified_snapshot, prefer_same_department, status, expires_at, accepted_at, boarded_at, boarding_code_hash, boarding_code_expires_at, boarding_attempt_count, version, last_command_id, created_at | 상태별 타임스탬프, 짧은 수명 탑승 코드 해시 |
 | `active_user_locks` | user_id, role, trip_id, request_id, created_at | user_id PK, DRIVER는 trip_id만, RIDER는 request_id만. 한 사람의 동시 활동 방지 |
 | `latest_locations` | user_id, trip_id, request_id, lat, lng, accuracy_m, captured_at, received_at, expires_at, sequence | user_id PK. 운전자 request_id=NULL. 사용자당 현재 좌표 1개만 보관 |
+| `location_disclosure_records` | id, owner_user_id, recipient_user_id, recipient_nickname, recipient_role, trip_id, request_id, sequence, purpose, provided_at | 좌표 없이, 새 위치 sequence가 상대에게 처음 응답된 시각·수신자·목적을 기록. owner 전용 조회, 동일 sequence/수신자 중복 기록 방지, 로컬 정리 기준 6개월 |
 | `sessions` | token_hash, user_id, csrf_hash, created_at, last_seen_at, expires_at, revoked_at | 원문 세션 토큰 금지. token_hash PK |
 | `oauth_states` | state_hash, nonce_hash, browser_binding_hash, safe_return_path, created_at, expires_at, consumed_at | state 1회 사용 및 브라우저 연계. PKCE 채택 시 verifier도 짧게 보호·보관 |
 | `consents` | id, user_id, kind, policy_version, granted_at, revoked_at | 약관·개인정보·위치 수집/상대 제공 등 목적별 기록. 실제 구분은 법무 검토로 확정 |
@@ -145,7 +146,7 @@ type DepartmentParseResult = {
 | `idempotency_keys` | user_id, operation, key, request_hash, command_id, result_json, http_status, created_at, expires_at | 복합 PK, command_id UNIQUE. 제한 정보 없는 mutation 결과만 저장 |
 | `rate_limit_buckets` | subject_hash, operation, window_start, count, expires_at | 복합 PK(subject_hash, operation, window_start). 플랫폼 제한 기능을 쓰지 않을 때의 원자적 카운터. IP는 단기 HMAC 값만 사용 |
 
-추가 법정 확인자료·제공 기록이 필요한지는 운영 검토로 정한다. `audit_events`가 모든 법정 기록을 대신한다고 가정하지 않는다. 학교/지도/정책 같은 설정은 버전 관리 파일과 검증된 환경변수로 시작하며 비밀값은 Secrets로 분리한다.
+`location_disclosure_records`는 최신 위치와 분리된 기록이며 좌표 삭제·계정 탈퇴 뒤에도 유지된다. 법정 확인자료 요건과 운영자 적용 여부는 미확정이다. `audit_events`가 모든 법정 기록을 대신한다고 가정하지 않는다. 학교/지도/정책 같은 설정은 버전 관리 파일과 검증된 환경변수로 시작하며 비밀값은 Secrets로 분리한다.
 
 ### 4.3 관계와 인덱스
 
@@ -170,6 +171,7 @@ erDiagram
 | `ride_requests` | UNIQUE(rider_id) WHERE status IN ('REQUESTED','ACCEPTED','BOARDED') |
 | `trips` | UNIQUE(driver_id) WHERE status IN ('OPEN','IN_PROGRESS') |
 | `latest_locations`, `sessions`, `oauth_states`, `idempotency_keys`, `rate_limit_buckets` | `expires_at` |
+| `location_disclosure_records` | `provided_at` 6 calendar months before cleanup; local provisional threshold |
 | `user_blocks` | 기존 복합 PK에 추가로 `(blocked_id, blocker_id)` |
 | `audit_events`, `reports` | 각각 `(resource_type, resource_id, created_at)`, `(status, created_at)` |
 
@@ -283,7 +285,7 @@ trigger는 수락뿐 아니라 요청 생성의 상호 제약과 부적절한 �
 - 학생 자격 만료·정지·차단은 관련 미탑승 요청을 취소한다. 운전자가 영향을 받으면 해당 OPEN 운행도 종료한다. 영향을 받는 관계에 BOARDED 승객이 있거나 운행이 IN_PROGRESS라면 운행 전체를 ABORTED로 전환하고 관련 요청·잠금을 함께 정리한다. 승객 간 차단도 같은 규칙을 적용한다. 물리적 하차를 자동 확인했다는 문구를 쓰지 않는다.
 - D1 행 삭제는 과거 백업/Time Travel 사본까지 즉시 지우는 보장이 아니다. 좌표 덮어쓰기도 백업에 흔적이 남을 수 있다. 실제 플랜의 복구 가능 기간·삭제·복원 절차를 확인해 정책에 반영한다.
 - 정책상 요구 기간을 플랫폼 기본 백업으로 만족할 수 없다면 별도 키를 이용한 좌표 필드 암호화와 키 폐기 등 대안을 검토한 뒤 출시한다. 단순 TTL만으로 영구 삭제 완료라고 쓰지 않는다.
-- 위치정보법 제19조에 따라 위치기반서비스 약관에는 운영자 연락처, 이용자 권리, 서비스 내용, 위치정보 및 이용·제공사실 확인자료의 보유 목적·기간 등을 반영해야 한다. 이용자가 지정한 제3자에게 위치를 제공할 때는 제공받는 자·제공 시각·목적을 매회 즉시 통지해야 하며, 별도 동의와 법령상 기준을 충족하는 경우에 한해 최대 30일 범위의 모아 통지가 가능하다. 위치정보 보호조치 기준 제6조는 사업자 등이 수집·이용·제공 및 통지 사실을 취급대장에 자동 기록하고 최소 6개월 보관하도록 정한다. 현재 Worker에는 매회/모아 통지 및 확인자료 저장 흐름이 없으므로 운영 적용 전 검토·구현이 필요하다. 서비스 운영자의 법 적용 및 신고·등록 해당 여부도 확인 전까지 미정이다. [위치정보법 제19조](https://law.go.kr/lsLinkCommonInfo.do?chrClsCd=010202&lsJoLnkSeq=1015334231) · [위치정보 보호조치 기준 제6조](https://www.law.go.kr/LSW/admRulLsInfoP.do?admRulSeq=2100000279386)
+- 위치정보법 제19조에 따라 위치기반서비스 약관에는 운영자 연락처, 이용자 권리, 서비스 내용, 위치정보 및 이용·제공사실 확인자료의 보유 목적·기간 등을 반영해야 한다. 이용자가 지정한 제3자에게 위치를 제공할 때는 제공받는 자·제공 시각·목적을 매회 즉시 통지해야 하며, 별도 동의와 법령상 기준을 충족하는 경우에 한해 최대 30일 범위의 모아 통지가 가능하다. 위치정보 보호조치 기준 제6조는 적용 대상 사업자에게 취급대장 자동 기록과 최소 6개월 보관을 요구한다. 현재 로컬 구현은 새 위치 sequence가 상대 화면에 처음 응답될 때 좌표 없는 제공 기록을 남기고 본인 화면에서 최근 20건을 통지한다. 동일 sequence 반복 조회는 중복 기록하지 않고 통지 확인 여부도 별도로 증명하지 않으므로, 이를 매회 통지·기록 요건 충족으로 간주할 수 없다. 로컬 정리 기준은 6개월이며 운영자 적용 여부·더 긴 기간 필요성·통지 확인자료는 법률/운영 검토 후 승인해야 한다. [위치정보법 제19조](https://law.go.kr/lsLinkCommonInfo.do?chrClsCd=010202&lsJoLnkSeq=1015334231) · [위치정보 보호조치 기준 제6조](https://www.law.go.kr/LSW/admRulLsInfoP.do?admRulSeq=2100000279386)
 
 ## 9. API 계약
 
@@ -319,7 +321,8 @@ trigger는 수락뿐 아니라 요청 생성의 상호 제약과 부적절한 �
 | POST `/trips/:tripId/cancel` | expectedVersion, reasonCode | OPEN 운행 운전자 취소, 요청 취소와 잠금 해제 |
 | POST `/trips/:tripId/abort` | expectedVersion, reasonCode | 운전자/운영자 중단 |
 | PUT `/locations/me` | tripId, requestId?, lat, lng, accuracyM, capturedAt, sequence | 현재 공유가 허용된 본인만 |
-| GET `/trips/:tripId/locations` | 없음 | 서버가 필터한 허용 상대의 최신 위치만 |
+| GET `/locations/me` | 없음 | 본인 최신 위치와 현재 활동의 최근 위치 제공 내역 20건, `no-store` |
+| GET `/trips/:tripId/locations` | 없음 | 서버가 필터한 허용 상대의 최신 위치; 새 sequence의 최초 응답은 좌표 없는 제공 기록으로 남김 |
 | GET `/me/active-peers` | 없음 | 수락/탑승된 현재 관계에서 본인에게 허용된 동승 상대만 |
 | GET `/blocks` | 없음 | 본인이 차단한 사용자 목록, `no-store` |
 | POST `/blocks` | blockedUserId | 실제 동승 이력이 있는 상대를 차단, 관련 활동 처리·감사 기록 |
@@ -509,7 +512,7 @@ Workers/D1 검증은 수락과 완료의 동일 키 재시도, 다른 본문 제
 
 `src/shared/location.ts`는 UUID 관계, 위경도 범위, 유한 양수 정확도, 캡처 시각, 안전한 양수 sequence만 허용한다. `PUT /api/v1/locations/me`는 본인 세션·학생 자격·네 필수 정책 동의·현재 OPEN 운행·ACCEPTED/BOARDED 관계를 확인하고, 조건 확인과 UPSERT를 한 SQL statement에서 처리한다. 서버는 60초보다 오래되거나 30초 초과 미래의 위치, 10초보다 잦은 업로드, sequence 역행을 거절하며 계정별 제한도 적용한다. 네트워크 재시도 결과는 위치 멱등 저장소에 보관하지 않는다.
 
-`GET /api/v1/locations/me`와 `GET /api/v1/trips/:tripId/locations`는 자격·양쪽의 현재 위치 동의·활동 잠금·관계·운행 상태·차단·TTL을 다시 확인하고 `Cache-Control: no-store`를 반환한다. 운전자는 수락된 자기 승객의 위치만 보고, 승객은 자기 운전자의 위치만 본다. 승객 상호 조회는 결과에 포함되지 않는다. 동의 철회와 수락된 요청의 취소는 관련 최신 좌표를 지운다.
+`GET /api/v1/locations/me`와 `GET /api/v1/trips/:tripId/locations`는 자격·양쪽의 현재 위치 동의·활동 잠금·관계·운행 상태·차단·TTL을 다시 확인하고 `Cache-Control: no-store`를 반환한다. 운전자는 수락된 자기 승객의 위치만 보고, 승객은 자기 운전자의 위치만 본다. 승객 상호 조회는 결과에 포함되지 않는다. 상대 위치 응답은 해당 owner·recipient·trip·sequence 조합을 D1에 한 번만 기록하고, 위치 소유자 화면은 현재 활동의 최근 20건을 인앱으로 알린다. 이는 새 위치 표본 단위의 로컬 통지이며 동일 sequence 재조회와 통지 확인을 기록하지 않으므로 법적 매회 통지 체계로 확정된 것이 아니다. 동의 철회와 수락된 요청의 취소는 관련 최신 좌표를 지운다. 제공 기록은 좌표를 포함하지 않으며 현재 로컬 정리 기준 6개월 뒤 삭제한다.
 
 웹 화면은 위치 수집, 상대 제공, 브라우저 권한을 분리한다. 사용자가 화면을 열고 명시적으로 시작해야 `watchPosition()`을 호출한다. 숨김 탭에서 수집과 조회를 멈추며 다시 보일 때 위치 수집은 자동으로 재개하지 않고 사용자 동작을 요구한다. 상대 위치 조회는 보이는 탭에서 5초 주기로 시작하고 오류 시 최대 30초 backoff를 사용한다. 로그아웃은 위치 watcher와 로컬 좌표를 지우며, 세션 revision이 지난 프로필·동의·위치 polling 응답은 화면 상태를 갱신하지 않는다. 신선도·정확도·거절·시간 초과·통신 오류를 표시하고 지정 승차 지점과 탑승 코드 대안을 제공한다. `src/web/location-map.ts`는 승차 지점 기준의 상대 좌표와 정확도 범위를 SVG 가상 위치도로 그린다. 30초 넘게 된 위치는 점으로 표시하지 않으며, 이 그림은 실제 도로·경로·거리 안내가 아니다. 실제 지도 SDK와 공급자는 미정이다.
 

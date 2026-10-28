@@ -25,6 +25,9 @@ type LocationPoint = {
   nickname: string; role: 'DRIVER' | 'RIDER'; lat: number; lng: number; accuracyM: number;
   capturedAt: number; receivedAt: number; expiresAt: number; sequence: number;
 };
+type LocationDisclosure = {
+  id: string; recipientNickname: string; recipientRole: 'DRIVER' | 'RIDER'; purpose: 'MEETING'; providedAt: number;
+};
 
 function VirtualLocationMap({
   stop,
@@ -125,6 +128,7 @@ function App() {
   const [locationStatus, setLocationStatus] = useState('');
   const [ownLocation, setOwnLocation] = useState<Omit<LocationPoint, 'nickname' | 'role'> | null>(null);
   const [sharedLocations, setSharedLocations] = useState<LocationPoint[]>([]);
+  const [locationDisclosures, setLocationDisclosures] = useState<LocationDisclosure[]>([]);
   const [locationStop, setLocationStop] = useState<{ name: string; lat: number; lng: number } | null>(null);
   const [tripBusy, setTripBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
@@ -134,6 +138,7 @@ function App() {
   const locationWatch = useRef<number | null>(null);
   const locationSequence = useRef(0);
   const lastLocationUpload = useRef(0);
+  const knownLocationDisclosures = useRef(new Set<string>());
   async function refreshMe(revision = profileRevision.current) {
     const response = await fetch('/api/v1/me', { cache: 'no-store' });
     if (!response.ok) return null;
@@ -683,6 +688,8 @@ function App() {
         setLocationStarted(false);
         setOwnLocation(null);
         setSharedLocations([]);
+        setLocationDisclosures([]);
+        knownLocationDisclosures.current.clear();
         setLocationStatus('위치 동의를 철회했습니다. 공유 위치를 삭제했습니다.');
       }
     } catch {
@@ -749,7 +756,7 @@ function App() {
             ? '위치 오차가 커 정확한 만남에는 적합하지 않습니다. 지정 승차 지점에서 만나 주세요.'
             : position.coords.accuracy > 50
               ? '위치 오차가 있습니다. 지정 승차 지점에서 만나 주세요.'
-              : '현재 위치를 동승 관계에 공유 중입니다.');
+              : '위치를 갱신했습니다. 동승 상대에게 실제 제공되면 제공 내역을 여기에 표시합니다.');
         } catch {
           setLocationStatus('연결이 끊겨 위치를 전송하지 못했습니다. 지정 승차 지점에서 만나 주세요.');
         }
@@ -782,6 +789,8 @@ function App() {
     setTripBusy(false);
     setOwnLocation(null);
     setSharedLocations([]);
+    setLocationDisclosures([]);
+    knownLocationDisclosures.current.clear();
     setLocationStop(null);
     setMessage('로그아웃했습니다.');
   }
@@ -801,7 +810,8 @@ function App() {
       if (revision !== profileRevision.current) return;
       profileRevision.current += 1;
       stopLocationWatch();
-      setProfile(null); setTripRequests([]); setOwnLocation(null); setSharedLocations([]); setLocationStop(null);
+      setProfile(null); setTripRequests([]); setOwnLocation(null); setSharedLocations([]); setLocationDisclosures([]); setLocationStop(null);
+      knownLocationDisclosures.current.clear();
       setBoardingCodes({});
       setMessage('계정 탈퇴를 완료했습니다. 관련 기록과 백업은 보관 정책에 따라 남을 수 있습니다.');
     } catch {
@@ -911,6 +921,8 @@ function App() {
     };
   }, []);
   useEffect(() => {
+    setLocationDisclosures([]);
+    knownLocationDisclosures.current.clear();
     if (activeLocationContext && locationConsented) return;
     stopLocationWatch();
     setOwnLocation(null);
@@ -935,11 +947,20 @@ function App() {
           fetch(`/api/v1/trips/${activeLocationContext.tripId}/locations`, { signal: controller.signal, cache: 'no-store' }),
         ]);
         if (!ownResponse.ok || !peerResponse.ok) throw new Error('location unavailable');
-        const own = await ownResponse.json() as { data: { sequence: number; location: typeof ownLocation } };
+        const own = await ownResponse.json() as { data: { sequence: number; location: typeof ownLocation; disclosures: LocationDisclosure[] } };
         const peers = await peerResponse.json() as { data: { stop: typeof locationStop; locations: LocationPoint[] } };
         if (stopped || controller.signal.aborted || revision !== profileRevision.current) return;
         locationSequence.current = Math.max(locationSequence.current, own.data.sequence);
         setOwnLocation(own.data.location);
+        setLocationDisclosures(own.data.disclosures);
+        const unseen = own.data.disclosures.filter((disclosure) => !knownLocationDisclosures.current.has(disclosure.id));
+        own.data.disclosures.forEach((disclosure) => knownLocationDisclosures.current.add(disclosure.id));
+        if (unseen.length) {
+          const disclosure = unseen[0];
+          const role = disclosure.recipientRole === 'DRIVER' ? '운전자' : '탑승자';
+          const notice = unseen.length > 1 ? `새 위치 제공 내역 ${unseen.length}건. 최근 내 위치가` : '내 위치가';
+          setLocationStatus(`${notice} ${disclosure.recipientNickname} (${role})에게 ${new Date(disclosure.providedAt).toLocaleString('ko-KR')} 만남 조율 목적으로 제공되었습니다.`);
+        }
         setLocationStop(peers.data.stop);
         setSharedLocations(peers.data.locations);
         delay = 5_000;
@@ -1212,6 +1233,7 @@ function App() {
         {activeLocationContext && <section aria-labelledby="location-title">
           <h3 id="location-title">동승 위치 공유</h3>
           <p>위치 공유는 수락된 운행 관계에서만 작동합니다. 내 위치는 현재 동승 상대에게만 제공되며, 출발·취소·종료·동의 철회 때 삭제됩니다.</p>
+          <p>상대 화면에 내 위치가 응답된 시각과 상대, 만남 조율 목적을 기록해 여기에 표시합니다.</p>
           <p>위치 동의는 위 설정에서 관리할 수 있습니다. 위치 공유를 철회하면 현재 좌표가 삭제되고 이후 업로드가 거절됩니다.</p>
           <p>지정 승차 지점: {locationStop?.name ?? (profile.activeActivity?.role === 'DRIVER' ? profile.activeTrip?.originName : profile.activeRequest?.originName)}</p>
           <p>실제 지도 SDK 대신 현재 좌표를 나타내는 가상 위치도를 사용합니다.</p>
@@ -1219,7 +1241,16 @@ function App() {
             <button type="button" disabled={!locationConsented || consentBusy || locationStarted}
               onClick={() => void startLocationSharing(activeLocationContext)}>내 위치 공유 시작</button>
           </div>
-          <p role="status">{locationStatus || (locationConsented ? '상대가 위치 공유를 시작하면 갱신 시각과 오차를 표시합니다.' : '위치 수집과 상대 제공 동의는 각각 선택할 수 있습니다.')}</p>
+          <p role="status">{locationStatus || (locationConsented ? '위치를 갱신하면 동승 상대에게 실제 제공된 내역을 표시합니다.' : '위치 수집과 상대 제공 동의는 각각 선택할 수 있습니다.')}</p>
+          {locationConsented && locationDisclosures.length > 0 && <div>
+            <h4>내 위치 제공 내역</h4>
+            <ul aria-label="내 위치 제공 내역">
+              {locationDisclosures.map((disclosure) => <li key={disclosure.id}>
+                {disclosure.recipientNickname} ({disclosure.recipientRole === 'DRIVER' ? '운전자' : '탑승자'}) ·{' '}
+                {new Date(disclosure.providedAt).toLocaleString('ko-KR')} · 만남 조율
+              </li>)}
+            </ul>
+          </div>}
           {locationConsented && locationStop && <VirtualLocationMap stop={locationStop} own={ownLocation} shared={sharedLocations} />}
           {locationConsented && locationStop && <p>승차 지점 좌표: {locationStop.lat.toFixed(5)}, {locationStop.lng.toFixed(5)}</p>}
           {locationConsented && ownLocation && <div>

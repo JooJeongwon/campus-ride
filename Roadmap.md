@@ -150,6 +150,8 @@ Google Auth Platform 콘솔: [campus-ride-gachon](https://console.cloud.google.c
 
 현재 로컬 구현은 위 핵심 흐름과 D1 권한 검증, 승차 지점 기준의 SVG 가상 위치도를 갖췄지만 P5는 미완료다. 30초 넘게 갱신되지 않은 점은 위치도에서 숨기며, 가상 위치도는 실제 도로·경로·거리 안내를 제공하지 않는다. NAVER Maps·Kakao Maps·Google Maps의 공식 웹 설정 및 계정/과금 조건 비교는 마쳤고 [Architecture §22](Architecture.md)에 근거를 기록했다. 다만 실제 운영 계정·도메인·사용량·정책 정보가 없어 공급자 선택과 SDK 연결은 보류한다. 정책 URL과 고지, iOS Safari·Android Chrome 실기기 시험도 남아 P5 완료 기준 전에 확정·검증하고 결과를 기록한다.
 
+2026-10-28 추가: `0018_location_disclosures.sql`과 위치 API/UI를 연결했다. 새 위치 sequence가 상대 화면에 처음 응답될 때 좌표를 복사하지 않고 수신자 ID·닉네임/역할 스냅샷·운행/요청·sequence·목적·시각을 기록하며, 위치 소유자 화면은 현재 활동의 최근 20건을 인앱으로 알린다. 동일 sequence 반복 조회는 중복 기록하지 않고 통지 확인 여부도 저장하지 않는다. 6개월 정리는 임시 로컬 기준이며 운영자 적용 여부와 더 긴 보관 필요성은 미확정이다. 따라서 법률상 매회 통지/확인자료 요건을 충족했다고 보지 않으며 P5 미완료다. 테스트·실기기 검증은 실행하지 않았다.
+
 2026-10-27: 위치 동의·수락 관계 위치 API·D1 출발/취소/철회 삭제·브라우저 공유 흐름을 구현했다. `npm run lint`, `typecheck`, `test:unit`(23), `test:integration`(37), `test:e2e`(6), `db:reset:local`, `build`가 통과했다. E2E는 새 합성 D1에서 실행했고 기존 로컬 D1을 백업 후 복원했다. 지도 설정·실제 위치 고지·모바일 실기기 시험은 미완료라 P5는 계속 진행 중이다.
 
 2026-10-27 추가: 승차 지점 기준의 SVG 가상 위치도에 현재 본인/허용된 상대 위치와 정확도 원을 표시하고 30초 지난 위치 점은 숨긴다. 로그아웃 때 위치 watcher와 좌표를 정리하고, 세션 전환 뒤 늦게 도착한 프로필·동의·위치 polling 응답은 무시한다. 가상 위치도 투영·신선도 단위 테스트 25개, lint, typecheck, build와 Chromium E2E 전체 6개가 통과했다. E2E는 원본 로컬 D1과 분리된 임시 합성 D1에서 실행했다. 실제 지도 설정·정책 고지·모바일 실기기 시험은 남아 P5는 미완료다.
@@ -164,7 +166,7 @@ Google Auth Platform 콘솔: [campus-ride-gachon](https://console.cloud.google.c
 - [x] 개인정보·위치 수집/상대 제공·철회·계정 삭제 화면을 완성한다.
 - [x] 운영자 확인으로 Workers Free 플랜을 기록하고, staging D1의 `production` backend·APAC region·현재 Time Travel bookmark를 확인한다. 공식 Free Time Travel 복구 창은 7일이다.
 - [ ] 복구로 탈퇴 전 정보가 되살아날 위험을 포함해 서비스의 보관·삭제·복구 절차를 승인한다. 법적 보관기간과 계정별 삭제 정책은 임의로 정하지 않는다.
-- [ ] 법적 확인자료·제공 기록이 필요한 경우 일반 audit와 구분해 추가한다.
+- [ ] 법적 확인자료 적용 여부를 확인하고, 별도 위치 제공 기록에 실제 통지 증빙·보유기간을 반영한다. 로컬 제공 기록만으로 법적 요건을 충족했다고 간주하지 않는다.
 - [x] Worker 응답에 동일 origin CSP·위치 Permissions-Policy를 적용하고, 사용자별 요청/코드 제한을 확인한다. Worker 애플리케이션 로그는 민감값을 출력하지 않는다.
 - [x] Wrangler에서 query string redaction과 invocation URL 로그 비활성화를 설정하고, Cron 정리 성공/지연/실패를 안전한 구조화 로그로 남긴다.
 - [x] 운영자가 확인한 Workers Free 플랜의 로그 한도·보존·비용 조건을 공식 문서와 staging 설정에 대조한다. 2026-11-30까지 200,000 이벤트/일·3일 보존, 2026-12-01부터 무료 0.5GB/일·7일 보존이며 Free 한도 초과 시 수집이 중단된다. 실제 사용량은 측정하지 않았다.

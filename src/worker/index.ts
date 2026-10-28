@@ -472,9 +472,17 @@ app.get('/api/v1/locations/me', async (c) => {
     .bind(result.session.userId, context.tripId, context.requestId).first<{
       sequence: number; lat: number; lng: number; accuracyM: number; capturedAt: number; receivedAt: number; expiresAt: number;
     }>();
+  const disclosures = await c.env.DB.prepare(`SELECT id,recipient_nickname AS recipientNickname,
+      recipient_role AS recipientRole,purpose,provided_at AS providedAt
+    FROM location_disclosure_records WHERE owner_user_id=? AND trip_id=? AND request_id IS ?
+    ORDER BY provided_at DESC,id DESC LIMIT 20`)
+    .bind(result.session.userId, context.tripId, context.requestId).all<{
+      id: string; recipientNickname: string; recipientRole: 'DRIVER' | 'RIDER'; purpose: 'MEETING'; providedAt: number;
+    }>();
   const fresh = location && location.expiresAt > now;
   return c.json({ data: {
     sequence: location?.sequence ?? 0,
+    disclosures: disclosures.results,
     location: fresh ? {
       lat: location.lat, lng: location.lng, accuracyM: location.accuracyM,
       capturedAt: location.capturedAt, receivedAt: location.receivedAt, expiresAt: location.expiresAt,
@@ -586,7 +594,7 @@ app.get('/api/v1/trips/:tripId/locations', async (c) => {
   }
   const versions = consentVersions(c.env);
   const targetSql = context.role === 'DRIVER' ? `WITH consented_users AS (${CONSENTED_USERS_SQL})
-    SELECT rider.nickname AS nickname,'RIDER' AS role,l.lat,l.lng,l.accuracy_m AS accuracyM,
+    SELECT l.user_id AS ownerUserId,rider.nickname AS nickname,'RIDER' AS role,l.lat,l.lng,l.accuracy_m AS accuracyM,
       l.captured_at AS capturedAt,l.received_at AS receivedAt,l.expires_at AS expiresAt,l.sequence
     FROM trips t JOIN users driver ON driver.id=t.driver_id
     JOIN driver_profiles p ON p.user_id=driver.id JOIN active_user_locks ownerLock
@@ -604,7 +612,7 @@ app.get('/api/v1/trips/:tripId/locations', async (c) => {
       AND rider.role='STUDENT' AND rider.account_status='ACTIVE' AND rider.affiliation_status='VERIFIED' AND rider.verified_until>?
       AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE
         (b.blocker_id=driver.id AND b.blocked_id=rider.id) OR (b.blocker_id=rider.id AND b.blocked_id=driver.id))` : `WITH consented_users AS (${CONSENTED_USERS_SQL})
-    SELECT driver.nickname AS nickname,'DRIVER' AS role,l.lat,l.lng,l.accuracy_m AS accuracyM,
+    SELECT l.user_id AS ownerUserId,driver.nickname AS nickname,'DRIVER' AS role,l.lat,l.lng,l.accuracy_m AS accuracyM,
       l.captured_at AS capturedAt,l.received_at AS receivedAt,l.expires_at AS expiresAt,l.sequence
     FROM ride_requests rr JOIN trips t ON t.id=rr.trip_id JOIN users driver ON driver.id=t.driver_id
     JOIN driver_profiles p ON p.user_id=driver.id JOIN users rider ON rider.id=rr.rider_id
@@ -623,13 +631,23 @@ app.get('/api/v1/trips/:tripId/locations', async (c) => {
     ? [...versions, now, now - 60_000, context.tripId, result.session.userId, now, now, now, now]
     : [...versions, now, now - 60_000, context.requestId, context.tripId, result.session.userId, now, now, now, now];
   const locations = await c.env.DB.prepare(targetSql).bind(...locationBindings).all<{
-    nickname: string; role: 'DRIVER' | 'RIDER'; lat: number; lng: number; accuracyM: number;
+    ownerUserId: string; nickname: string; role: 'DRIVER' | 'RIDER'; lat: number; lng: number; accuracyM: number;
     capturedAt: number; receivedAt: number; expiresAt: number; sequence: number;
   }>();
+  if (locations.results.length) {
+    const providedAt = Date.now();
+    // shortcut: unchanged location sequences are recorded once per recipient; log every response if legal review requires it.
+    await c.env.DB.batch(locations.results.map((location) => c.env.DB.prepare(`INSERT OR IGNORE INTO location_disclosure_records
+      (id,owner_user_id,recipient_user_id,recipient_nickname,recipient_role,trip_id,request_id,sequence,purpose,provided_at)
+      VALUES(?,?,?,?,?,?,?,?, 'MEETING',?)`)
+      .bind(crypto.randomUUID(), location.ownerUserId, result.session.userId, result.session.nickname,
+        context.role, context.tripId, context.requestId, location.sequence, providedAt)));
+  }
   return c.json({ data: {
     tripId: context.tripId, viewerRole: context.role,
     stop: { name: context.stopName, lat: context.stopLat, lng: context.stopLng },
-    locations: locations.results,
+    locations: locations.results.map(({ nickname, role, lat, lng, accuracyM, capturedAt, receivedAt, expiresAt, sequence }) =>
+      ({ nickname, role, lat, lng, accuracyM, capturedAt, receivedAt, expiresAt, sequence })),
   }, meta: { requestId: c.get('requestId') } }, { headers: { 'Cache-Control': 'no-store' } });
 });
 

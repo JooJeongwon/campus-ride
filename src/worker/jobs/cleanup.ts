@@ -105,6 +105,7 @@ export async function cleanupExpiredData(db: D1Database, now = Date.now(), onSta
   onStage('DELETE_EXPIRED_ROWS');
   const expired = await Promise.all([
     deleteExpiredRows(db, 'latest_locations', 'user_id', 'expires_at<=?', now),
+    deleteExpiredRows(db, 'location_disclosure_records', 'id', 'provided_at<=?', sixCalendarMonthsBefore(now)),
     deleteExpiredRows(db, 'sessions', 'token_hash', '(expires_at<=? OR revoked_at IS NOT NULL)', now),
     deleteExpiredRows(db, 'oauth_states', 'state_hash', '(expires_at<=? OR consumed_at IS NOT NULL)', now),
     deleteExpiredRows(db, 'idempotency_keys', 'rowid', 'expires_at<=?', now),
@@ -112,6 +113,16 @@ export async function cleanupExpiredData(db: D1Database, now = Date.now(), onSta
   ]);
   const statements = expired.filter((statement): statement is D1PreparedStatement => statement !== null);
   if (statements.length) await db.batch(statements);
+}
+
+function sixCalendarMonthsBefore(timestamp: number) {
+  const cutoff = new Date(timestamp);
+  const day = cutoff.getUTCDate();
+  cutoff.setUTCDate(1);
+  cutoff.setUTCMonth(cutoff.getUTCMonth() - 6);
+  const lastDay = new Date(Date.UTC(cutoff.getUTCFullYear(), cutoff.getUTCMonth() + 1, 0)).getUTCDate();
+  cutoff.setUTCDate(Math.min(day, lastDay));
+  return cutoff.getTime();
 }
 
 export async function runScheduledCleanup(db: D1Database, scheduledTime: number) {
