@@ -2,6 +2,8 @@
 
 이 파일은 구현 저장소 루트에 적용되는 개발 지침이다. P1~P4 로컬 구현, P5 위치 공유·가상 위치도, P6 로컬 기능과 staging D1/Worker 배포가 있다. 대상 학교는 가천대학교 하나, 서비스 캠퍼스는 글로벌캠퍼스(성남), 메일 도메인은 `gachon.ac.kr`이며 학교 선택 UI는 두지 않는다. Staging D1 backend는 `production`이며 region은 APAC이고 16개 migration이 적용됐다. 운영자는 Workers Free이며 도메인 등록은 별도 결제라고 확인했다. Free D1 Time Travel은 7일이고 Workers 로그의 보존·한도는 Roadmap §8/Architecture §30에 기록했다. Google Cloud 프로젝트와 staging OAuth client를 만들고 Client ID 및 `GOOGLE_CLIENT_SECRET`을 Worker에 연결해 닫힌 staging 설정으로 배포했다. 가천대학교 Workspace 계정을 OIDC로 정상 인증하면 현재 재학생 심사 없이 이용 가능하며, 자격은 세션과 함께 최대 7일 유효하고 Google 재인증 시 갱신한다. `SCHOOL_CONFIG_READY=false`라 staging API는 계속 닫혀 있다. 실제 Workspace `hd`·지원 이메일 설정 확인·학과·승하차 지점·서비스의 데이터 보관/복구 정책·지도 공급자·위치 정책·모바일 실기기와 운영 설정은 남아 있다. 작업 전 Roadmap의 최신 완료 상태와 실제 코드를 함께 확인한다. 기존 지침과 사용자 지시의 적용 범위를 먼저 확인한다.
 
+네 가지 정책 문안은 docs/policies/에 검토용 초안으로 작성했으나 운영자 정보·연락처·보유기간과 위치 제3자 제공 통지 기능은 미확정/미구현이므로 동의·배포에 사용하지 않는다.
+
 ## 1. 읽는 순서와 작업 원칙
 
 1. [Project.md](Project.md): 목표·기능·기본값·미확정 사항.
