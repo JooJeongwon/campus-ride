@@ -5,7 +5,7 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { z } from 'zod';
 import { consentPolicies, environmentSchema, type Bindings } from './env';
 import { cookieName, cookieOptions } from './env';
-import { createSession, csrfToken, getSession, sha256, verifyMutation, clearSessionCookie } from './auth/session';
+import { createSession, csrfToken, getSession, sha256, verifyMutation, clearSessionCookie, SESSION_MAX_AGE_MS } from './auth/session';
 import { authorizationUrl, consumeAuthorizationResponse, isGoogleConfigured, validReturnPath } from './auth/google';
 import { consentSchema, devLoginSchema, driverProfileDecisionSchema, driverProfileSchema, profileUpdateSchema, verificationDecisionSchema } from '../shared/auth';
 import { adminRouteCreateSchema, adminRouteUpdateSchema, adminStopSchema } from '../shared/admin';
@@ -344,20 +344,26 @@ app.get('/api/v1/auth/google/callback', async (c) => {
       throw new Error('ACCOUNT_NOT_ACTIVE_OR_OUT_OF_SCOPE');
     }
     const userId = existing?.id ?? crypto.randomUUID();
-    if (existing) {
-      await c.env.DB.prepare('UPDATE users SET email=?,updated_at=? WHERE id=? AND account_status<>\'DELETED\'')
-        .bind(claims.email, Date.now(), userId).run();
-    } else {
-      const now = Date.now();
-      await c.env.DB.prepare(`INSERT INTO users
+    const now = Date.now();
+    const schoolAssertion = c.env.STUDENT_VERIFICATION_MODE === 'SCHOOL_ASSERTION';
+    const statements = existing
+      ? [c.env.DB.prepare('UPDATE users SET email=?,updated_at=? WHERE id=? AND account_status<>\'DELETED\'')
+        .bind(claims.email, now, userId)]
+      : [c.env.DB.prepare(`INSERT INTO users
         (id,google_sub,school_id,campus_id,email,nickname,department_id,department_status,
          department_source,parser_version,gender,affiliation_status,account_status,role,created_at,updated_at)
         VALUES(?,?,?,?,?,?,?,?,?,?,'UNDISCLOSED','PENDING','ACTIVE','STUDENT',?,?)`)
         .bind(userId, claims.subject, c.env.SCHOOL_ID, c.env.CAMPUS_ID, claims.email, claims.name,
-          claims.departmentCode, claims.departmentStatus, claims.departmentSource, claims.parserVersion, now, now).run();
+          claims.departmentCode, claims.departmentStatus, claims.departmentSource, claims.parserVersion, now, now)];
+    if (schoolAssertion) {
+      statements.push(c.env.DB.prepare(`INSERT INTO student_verifications
+        (id,user_id,method,outcome,department_id,verified_at,valid_until,created_at)
+        VALUES(?,?,'SCHOOL_ASSERTION','VERIFIED',?,?,?,?)`)
+        .bind(crypto.randomUUID(), userId, claims.departmentCode, now, now + SESSION_MAX_AGE_MS, now));
     }
+    await c.env.DB.batch(statements);
     clearBrowserBinding();
-    await createSession(c, userId);
+    await createSession(c, userId, now);
     return c.redirect(validReturnPath(claims.returnPath, c.env.APP_ORIGIN), 302);
   } catch {
     clearBrowserBinding();

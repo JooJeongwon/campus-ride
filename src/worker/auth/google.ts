@@ -20,7 +20,8 @@ export function isGoogleConfigured(env: Bindings): boolean {
 }
 
 function environmentReady(env: Bindings): boolean {
-  return Boolean(env.SCHOOL_ID && env.CAMPUS_ID && env.STUDENT_VERIFICATION_MODE === 'MANUAL_REVIEW'
+  return Boolean(env.SCHOOL_ID && env.CAMPUS_ID
+    && ['MANUAL_REVIEW', 'SCHOOL_ASSERTION'].includes(env.STUDENT_VERIFICATION_MODE ?? '')
     && allowedDomains(env.ALLOWED_EMAIL_DOMAINS).length && allowedDomains(env.ALLOWED_HOSTED_DOMAINS).length
     && env.DEPARTMENT_TEMPLATE && env.DEPARTMENT_ALIASES_JSON
     && env.POLICY_TERMS_VERSION && env.POLICY_TERMS_URL && env.POLICY_PRIVACY_VERSION && env.POLICY_PRIVACY_URL);

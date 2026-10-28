@@ -94,7 +94,7 @@ Google 토큰 검증 근거: [OpenID Connect](https://developers.google.com/iden
 
 ### 3.3 학생 자격과 학과 파싱
 
-학생 자격은 `PENDING`, `VERIFIED`, `EXPIRED`, `REJECTED`로 분리한다. 가천대학교의 `gachon.ac.kr` Google 계정은 가입·로그인 조건으로만 사용한다. 메일 도메인이나 Google Workspace `hd`만으로 현재 재학생을 인정하지 않는다. 실제 학생 확인은 승인된 원장 또는 운영자 검토로 수행하고, 확인 전에는 `PENDING` 상태로 둔다. 확인 방법은 `SCHOOL_ASSERTION`, `AUTHORIZED_ROSTER`, `MANUAL_REVIEW` 중 실제 제공 가능한 방식으로 정한다. `verified_until`이 지나면 인증된 계정이어도 운행·요청·위치 공유 권한을 중지한다. 확인 주기는 학교 기준을 설정하며 유효기간 없는 승인을 만들지 않는다.
+운영자 결정에 따라 현재 재학생 여부를 별도로 심사하지 않고 정상 인증된 가천대학교 Google 계정을 이용 자격으로 인정한다. Worker는 Google ID token의 서명·issuer·audience·만료·nonce, `email_verified`, `gachon.ac.kr` 이메일, 설정된 Workspace `hd`를 검증한 뒤 `SCHOOL_ASSERTION` 확인 기록을 만들고 계정을 `VERIFIED`로 바꾼다. 이 정책은 해당 Workspace를 가진 교직원·졸업생도 허용한다. 자격 기간은 세션 최대 수명과 같은 7일이며 Google 재인증 시 갱신한다. 재인증 전에는 만료·정리 규칙으로 운행·요청·위치 권한을 중지한다. 학과는 이 인증과 별개이며 파싱 결과는 운영 확인 전까지 `UNVERIFIED` 또는 `UNKNOWN`이다.
 
 학과 파서는 다음 계약을 가진다.
 
@@ -385,7 +385,8 @@ trigger는 수락뿐 아니라 요청 생성의 상호 제약과 부적절한 �
 | 결정 | 현재 기본값 | 확정 시점 |
 | --- | --- | --- |
 | 학교·계정 범위 | 가천대학교 단일 학교, `gachon.ac.kr` 메일, 학교 선택 UI 없음. 실제 Workspace `hd`와 단일 캠퍼스는 검증/확정 대기 | P0/P2 |
-| 실제 학생·운전자 확인 수단 | 학교 Google 로그인은 가입 조건. 현재 재학생·운전자 확인 절차와 담당자는 미정이며 계정은 확인 전 `PENDING` | P0/P2, 파일럿 전 필수 |
+| 서비스 계정 자격 | 정상 인증된 가천대학교 Google 계정이면 현재 재학생 여부와 관계없이 이용 자격을 부여한다. Google 재인증 주기는 세션 만료에 맞춰 7일 | P0 사용자 결정; staging OIDC 검증 대기 |
+| 운전자 확인 수단 | 학생 계정 자격과 별도로 차량·운전자 프로필은 운영자 승인 전 `PENDING` | P0/P3, 파일럿 전 필수 |
 | 지도 공급자 | 어댑터만 확정; 공식 설정·과금 문서를 비교했으나 운영 계정·도메인·약관 미정으로 선택 보류 | P0/P5 |
 | 같은 학과 우선 | 검증된 학과의 추천 순위 | P0 |
 | 성별 선택 의미 | 전체 동승자 간 양방향 조건 | P0 |
@@ -408,7 +409,7 @@ npm run dev
 
 `http://localhost:8787`에서 개발 화면을 연다. Cloudflare 계정·OAuth·지도 키 없이 실행된다. `.dev.vars.example`을 `.dev.vars`로 복사하는 것은 선택이며 기본값은 `wrangler.jsonc`에 있다. 프런트는 same-origin `/api/v1/health`를 호출하고 Worker가 로컬 D1의 `users` 테이블에 질의한 뒤 안전한 상태만 반환한다. migration이 없으면 JSON 503을 반환한다. 데이터·에러 세부사항을 클라이언트에 반환하거나 로그에 쓰지 않는다.
 
-P1의 API는 health와 접근 거부 응답이었다. P2에서는 조건부 Google OIDC, D1 세션, 자기 프로필, 수동 학생 확인 요청·관리자 검토 및 버전형 약관/개인정보 동의 경로를 추가했다. 미등록 운행·요청·위치 API는 JSON 404다. 학교 설정이 없는 기본 로컬/staging/production 환경에서는 Google 로그인이 닫혀 있고 원격 환경 전체가 설정 검사에서 503으로 차단된다. 개발 로그인은 local Wrangler의 `ALLOW_DEV_AUTH=true`와 정확한 localhost origin을 요구하며 seed된 운전자/탑승자/확인 대기 ID 세 개만 고른다. 이 경로에는 임의 계정 생성 입력이 없고 원격 환경에서는 활성화할 수 없다.
+P1의 API는 health와 접근 거부 응답이었다. P2에서는 조건부 Google OIDC, D1 세션, 자기 프로필, 가천대 계정 자동 자격 부여, 로컬/기존 계정용 수동 확인 경로 및 버전형 약관/개인정보 동의를 추가했다. 미등록 운행·요청·위치 API는 JSON 404다. 학교 설정이 없는 기본 로컬/staging/production 환경에서는 Google 로그인이 닫혀 있고 원격 환경 전체가 설정 검사에서 503으로 차단된다. 개발 로그인은 local Wrangler의 `ALLOW_DEV_AUTH=true`와 정확한 localhost origin을 요구하며 seed된 운전자/탑승자/확인 대기 ID 세 개만 고른다. 이 경로에는 임의 계정 생성 입력이 없고 원격 환경에서는 활성화할 수 없다.
 
 `migrations/0001_initial.sql`은 §4의 18개 테이블, FK·CHECK·부분 UNIQUE와 조회/만료 인덱스를 만든다. `routes.school_id`와 복합 FK는 지점 간 학교·캠퍼스 불일치를 막는다. `0005`는 운행 생성 시 DRIVER 잠금을, `0006`은 요청 생성 시 RIDER 잠금을 같은 SQL statement에서 만든다. `0007`은 status/version/command 전이, 수락 시 최신 자격·좌석·전체 동승자 양방향 성별 조건·차단 관계, 탑승 코드 검증 조건, 종료 시 잠금·위치 권한 정리를 D1 trigger로 보호한다. `0008`은 기존 탑승자와 운전자 사이에 차단이 추가된 경우에도 새 수락이 거절되도록 보완한다. 상태 전이 batch는 결과 존재 여부를 최종 제약으로 검증해 조건 UPDATE 0건이 조용히 성공하지 않게 한다. 통합 테스트의 `batch_probe` trigger는 D1 동작 검증용으로 격리된 테스트 DB에만 만든다. batch 오류 롤백과 0행 UPDATE의 정상 커밋을 [D1 batch 계약](https://developers.cloudflare.com/d1/worker-api/d1-database/#batch)에 맞춰 확인한다.
 
@@ -418,15 +419,15 @@ P1의 API는 health와 접근 거부 응답이었다. P2에서는 조건부 Goog
 
 `GET /api/v1/auth/google/start`는 state·nonce·브라우저 바인딩 쿠키·PKCE S256 verifier를 준비한다. 브라우저 비밀과 state는 D1의 SHA-256 값으로 연결하고 verifier는 10분짜리 OAuth 상태 행에 보관한다. `GET /callback`은 state/쿠키/만료를 한 개 조건부 UPDATE에서 검사·소비해 재사용을 막고, 라이브러리로 token exchange와 OIDC claim 검증을 수행한 뒤 `validateApplicationLevelSignature()`로 discovery JWKS 서명을 별도 확인한다. `sub`를 사용자 고유키로 쓴다. `email_verified`, 정확히 허용된 이메일 도메인, 허용 `hd`, issuer·signature·audience·expiry·nonce를 모두 확인한다. 이메일이 바뀌어도 서로 다른 `sub` 사용자를 병합하지 않는다. Google refresh token을 요청하거나 보관하지 않는다.
 
-새 계정은 `STUDENT/ACTIVE/PENDING/UNDISCLOSED`로 만든다. Google 이름은 닉네임 후보에만 사용하고 사용자가 성별을 입력하기 전에는 `UNDISCLOSED`다. 학과는 설정된 local-part 또는 Google name에서 제한된 템플릿으로만 후보를 파싱하고, 운영자 승인 전에는 `UNVERIFIED`다. 학교 설정에서 잘못된/모호한 값은 `UNKNOWN`이다. 허용 이메일 도메인은 가천대학교의 `gachon.ac.kr`로 확정됐지만 실제 Workspace `hd`, 캠퍼스, 학과 파서 설정은 검증 전까지 원격 환경에 두지 않는다.
+새 계정은 `STUDENT/ACTIVE/PENDING/UNDISCLOSED`로 만들고, 검증된 가천대학교 Google 계정이면 같은 D1 batch에서 `SCHOOL_ASSERTION` 기록을 추가해 `VERIFIED`로 바꾼다. 확인 기간 7일은 세션 최대 수명과 같다. 재인증마다 새 확인 기록으로 갱신하며 대기 중이던 수동 요청은 `EXPIRED` 처리한다. Google 이름은 닉네임 후보에만 사용하고 사용자가 성별을 입력하기 전에는 `UNDISCLOSED`다. 학과는 설정된 local-part 또는 Google name에서 제한된 템플릿으로만 후보를 파싱하고 운영 확인 전에는 `UNVERIFIED`다. 학교 설정에서 잘못되거나 모호한 값은 `UNKNOWN`이다. 허용 이메일 도메인은 `gachon.ac.kr`이며 실제 Workspace `hd`, 캠퍼스, 학과 파서 설정은 검증 전까지 원격 환경에 두지 않는다.
 
 세션 쿠키에는 256비트 무작위 opaque 토큰만 담고 SHA-256 해시만 D1에 저장한다. 운영 쿠키는 `__Host-campus_session`과 `__Host-campus_oauth`, HTTPS `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`를 쓴다. localhost에서는 `campus_session` / `campus_oauth`를 사용한다. 세션 최대 수명은 7일, 유휴 만료는 24시간이고 사용자는 본인/ADMIN 조회·mutation마다 다시 읽어 정지 상태를 확인한다. 모든 응답은 `no-store`다. PATCH·검증 요청·로그아웃·관리자 판단은 exact Origin 및 세션 토큰에서 파생한 HMAC CSRF 토큰을 검증한다. 로컬 전용으로만 고정된 개발 HMAC fallback이 있고 원격 환경은 길이 확인된 `CSRF_HMAC_KEY` 없이는 503이다.
 
 `GET /api/v1/me`는 현재 요구되는 TERMS·PRIVACY 정책 버전, HTTPS 정책 URL, 동의 상태를 돌려준다. `POST /api/v1/me/consents`는 exact Origin·CSRF를 확인해 한 종류의 동의를 저장하거나 철회한다. 현재 버전과 입력 버전이 다르면 409이며 이전 버전 동의는 접근을 허용하지 않는다. 기본 동의 화면은 두 항목을 따로 표시하고 철회할 수 있다. P5는 위치 수집·상대 제공 동의를 별도 항목으로 추가한다. 최신 두 동의가 없으면 프로필 수정·학생 확인·관리자 검토가 거절된다. `migrations/0003_consents.sql`의 부분 unique index는 같은 사용자·항목·버전에 대한 활성 동의 중복을 막는다. 로컬 합성 로그인은 실제 약관이 아닌 로컬 데모 문구와 `local-demo-v1`을 사용한다. 실제 Google OIDC는 local에서도 TERMS·PRIVACY 정책 버전과 HTTPS URL이 설정되어야 시작할 수 있다. 원격은 학교·OAuth 설정과 함께 위치 정책 두 종류의 버전·HTTPS URL도 요구한다.
 
-`POST /api/v1/me/verification-requests`는 본인이 보고한 학적 원본 없이 단 한 건의 PENDING 확인 요청을 접수한다. `GET/PATCH /api/v1/admin/verification-requests`는 DB의 ACTIVE ADMIN만 읽고 판단한다. 권한 조건과 자기 자신의 요청 거부를 migration trigger가 확인하며 승인·거절 감사 INSERT가 프로필의 학적 상태를 같은 SQL statement에서 변경한다. 승인은 관리자가 명시적 `validUntil`을 제출해야 한다. 별도 HTTP로 ADMIN을 지정하는 수단은 없다. 학교가 정한 관리자, 확인 기간, 정책 URL/내용, roster·SSO source가 제공되지 않아 원격 Google 로그인은 열지 않았다.
+학교 Google `SCHOOL_ASSERTION` 모드에서는 새 계정이 별도 수동 확인 요청 없이 자격을 얻는다. `POST /api/v1/me/verification-requests` 및 `GET/PATCH /api/v1/admin/verification-requests`는 로컬 수동 모드와 기존 대기 기록을 위한 호환 경로로 남긴다. 학생 계정 검토와 별개로 차량·운전자 승인 대기열은 유지한다. 별도 HTTP로 ADMIN을 지정하는 수단은 없다. OAuth credentials, 실제 Workspace `hd`, 캠퍼스, 정책 URL/내용이 미설정이므로 원격 Google 로그인은 계속 닫혀 있다.
 
-가천대학교 이메일 도메인 `gachon.ac.kr`은 확정됐지만 Google OAuth client ID·secret과 실제 Workspace `hd` claim이 없어 원격 OAuth를 수행할 수 없다. 그 대신 로컬 로그인은 고정 합성 seed 계정만 허용한다. `.dev.vars.example`의 `ALLOW_DEV_AUTH=true`는 `APP_ENV=development`, localhost, 세 개의 seed UUID, exact Origin 검사를 통과하는 로컬 Worker에만 효과가 있다. staging/production의 강제 false와 도메인/Secret/학교 준비 검사는 이 경로를 닫는다. 실제 OAuth credentials 발급, 등록 redirect `APP_ORIGIN/api/v1/auth/google/callback`, 단일 캠퍼스와 학생 확인 규칙 확정은 P0 외부 설정이며 여기서 추정하지 않는다.
+가천대학교 이메일 도메인 `gachon.ac.kr`은 확정됐지만 Google OAuth client ID·secret과 실제 Workspace `hd` claim이 없어 원격 OAuth를 수행할 수 없다. 그 대신 로컬 로그인은 고정 합성 seed 계정만 허용한다. `.dev.vars.example`의 `ALLOW_DEV_AUTH=true`는 `APP_ENV=development`, localhost, 세 개의 seed UUID, exact Origin 검사를 통과하는 로컬 Worker에만 효과가 있다. staging/production은 `STUDENT_VERIFICATION_MODE=SCHOOL_ASSERTION`, `gachon.ac.kr` 단일 이메일 도메인과 검증된 Workspace `hd`를 요구한다. 실제 OAuth credentials 발급, 등록 redirect `APP_ORIGIN/api/v1/auth/google/callback`, 단일 캠퍼스와 정책 설정은 P0 외부 설정이며 여기서 추정하지 않는다.
 
 설정: `GOOGLE_CLIENT_ID`는 Wrangler vars, `GOOGLE_CLIENT_SECRET`, `CSRF_HMAC_KEY`, `BOARDING_HMAC_KEY`는 로컬 `.dev.vars` 또는 원격 Wrangler Secrets, 학교 ID·campus·정확한 email/hosted-domain allowlist·학생 확인 방식·학과 source/template/aliases는 검증된 env vars로 제공한다. 로컬 boarding HMAC은 개발 전용 fallback을 쓰며 원격은 별도 32자 이상 키가 없으면 환경 검증에서 차단한다. 운영/실제 staging 설정은 학교가 확인된 뒤 적용한다. 현재 실제 값이 없어 원격 환경 검사는 닫혀 있다. OAuth 시작/콜백 오류·학교 계정 거부는 안전한 JSON 오류만 반환하고 요청 URL/query·코드·토큰·이메일을 서버 로그로 내보내지 않는다.
 
@@ -552,7 +553,7 @@ Workers/D1 통합 테스트는 비당사자·무CSRF 접수 거절, 신고 상�
 
 운영자 화면은 `GET /api/v1/admin/verification-requests`와 `GET /api/v1/admin/driver-profiles`를 사용해 학생 자격과 차량 확인 대기열을 표시한다. 승인 시 운영자가 한국 시간 기준 유효기간을 직접 입력하고, 거절은 별도 동작이다. `PATCH` 요청은 기존 활성 ADMIN·현재 동의·exact Origin·CSRF 검증과 감사 이벤트 trigger를 거치며, 대기 상태가 이미 바뀌었거나 유효기간이 지난 결정은 거절된다. 새 API·DB migration은 추가하지 않았다.
 
-학생 대기열에는 닉네임·학과 확인 상태·요청 시각을, 차량 대기열에는 승인 검토에 필요한 차량 정보와 동승 정원을 표시한다. 차량 식별 정보는 API가 이미 운영자에게만 반환하는 필드이며 이 화면은 같은 제한 응답을 사용한다. 학교의 실제 학생 확인 절차·차량 증빙·승인 기간은 미확정이므로 임의의 기본 기간이나 실제 학교 데이터를 넣지 않았다. P6의 계정 삭제·보관·관측 항목이 남아 P6는 미완료다.
+학생 대기열은 로컬 수동 모드와 기존 대기 요청 호환용이며, Google `SCHOOL_ASSERTION` 모드에서는 정상 재인증으로 대기 요청을 닫는다. 차량 대기열에는 승인 검토에 필요한 차량 정보와 동승 정원을 표시한다. 차량 식별 정보는 API가 이미 운영자에게만 반환하는 필드이며 이 화면은 같은 제한 응답을 사용한다. 차량 증빙·승인 기간은 미확정이므로 임의의 기본 기간이나 실제 학교 데이터를 넣지 않았다. P6의 계정 삭제·보관·관측 항목이 남아 P6는 미완료다.
 
 ## 27. P6 지점·노선 운영 1차 (2026-10-28)
 

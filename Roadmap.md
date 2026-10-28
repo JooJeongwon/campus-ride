@@ -1,6 +1,6 @@
 # 교내 동승 매칭 웹앱 — Roadmap
 
-작성일: 2026-10-28 · 상태: **가천대학교 단일 대상과 `gachon.ac.kr` 메일 규칙 확정(학교 선택 UI 없음); P0의 캠퍼스·학생 자격·학과·운영 규칙, P1~P4 로컬 구현, P5 위치 공유·가상 위치도 구현 및 공급자 문서 비교, P6 로컬 구현·staging 연결; 서비스 보관·복구 승인·실기기·학교 정책 검증 대기**
+작성일: 2026-10-28 · 상태: **가천대학교 단일 대상과 `gachon.ac.kr` 메일 규칙 확정(학교 선택 UI 없음); 학교 계정 OIDC 인증자를 별도 재학생 심사 없이 허용하도록 로컬 구현; P0의 캠퍼스·학과·운영 규칙, P1~P4 로컬 구현, P5 위치 공유·가상 위치도 구현 및 공급자 문서 비교, P6 로컬 구현·staging 연결; 서비스 보관·복구 승인·실기기·학교 정책 검증 대기**
 
 이 문서는 [Project.md](Project.md)의 요구사항을 [Architecture.md](Architecture.md)의 구조로 구현하기 위한 순서다. [AGENTS.md](AGENTS.md)의 검증·보안·작업 규칙을 적용한다. 일정과 담당자는 팀 구성 후 정하며 아래 체크박스는 실제 완료 전까지 체크하지 않는다.
 
@@ -26,7 +26,7 @@
 - [ ] 단일 서비스 캠퍼스를 확정하고 실제 Google ID token의 Workspace `hd` claim이 허용 조직 값과 일치하는지 staging 로그인으로 확인한다.
 - [ ] 이메일 local-part/Google 표시 이름/학교 디렉터리 중 학과 정보가 실제 존재하는 필드를 확인한다.
 - [ ] 개인정보 없는 학과 문자열 예시, 예외 포맷, 학과 코드·별칭 표를 확보한다.
-- [ ] 학교 Google 계정은 가입 조건으로 사용한다. 현재 재학생과 교직원·졸업생 구분은 도메인만으로 판정하지 않고 승인된 학생 확인 방식·유효기간을 정한다. 확인 전에는 `PENDING`을 유지한다.
+- [x] 사용자 결정: 정상 인증된 가천대학교 Google 계정이면 현재 재학 여부와 관계없이 이용을 허용한다. 실제 이메일 도메인과 Workspace `hd`는 OIDC에서 검증하고 7일 뒤 Google 재인증한다.
 - [ ] 운전자 자격·보험 확인의 담당자와 절차를 정한다. 자기 체크만으로 공적 검증이 됐다고 표시하지 않는다.
 - [ ] 실제 교문·목적지·안전한 정차 위치·허용 노선을 확인한다.
 - [ ] 같은 학과 우선은 순위, 성별 선택은 전체 동승자 간 조건이라는 기본값을 제품 결정으로 기록한다.
@@ -36,7 +36,7 @@
 
 **완료 기준:** Project의 학교별 확인 표에 실제 근거 또는 명시적 미확정 상태가 있고, 확정 정보와 가정이 구분된다. 학교가 특정되지 않아도 합성 학교 설정과 파서 fixture는 준비한다. 실제 서비스가 합법/출시 가능하다고 이 단계에서 추정 선언하지 않는다.
 
-2026-10-28: 운영자가 가천대학교 한 곳만 대상으로 하고 학교 선택 UI를 만들지 않으며, 허용 학교 이메일 도메인을 `gachon.ac.kr`로 정했다. Workspace `hd`, 실제 대상 캠퍼스, 현재 재학생 판정, 학과 포맷·별칭, 승하차 지점, 운영·법적 정책은 여전히 확인이 필요하다. 학교 Google 계정 로그인은 계정 접근을 검증할 뿐 현재 재학생을 증명하지 않으므로, 기존 정책대로 자격 확인 전에는 `PENDING`으로 유지한다.
+2026-10-28: 운영자가 가천대학교 한 곳만 대상으로 하고 학교 선택 UI를 만들지 않으며, 허용 이메일 도메인을 `gachon.ac.kr`로 정했다. 이후 사용자 지시에 따라 정상 인증된 해당 학교 Google 계정 소유자는 현재 재학 여부와 무관하게 가입·이용을 허용한다. 구현은 `SCHOOL_ASSERTION` 기록으로 자격을 즉시 부여하고 세션 최대 수명인 7일 뒤 Google 재인증으로 갱신한다. Workspace `hd`, 실제 대상 캠퍼스, 학과 포맷·별칭, 승하차 지점, 운영·법적 정책은 확인이 필요하다.
 
 2026-10-27: 실제 학교 정보·운영 담당자·학교 포맷은 제공되지 않아 위 외부 확인 항목을 미완료로 유지한다. Project §3에 미확정 상태를 명시했고 `fixtures/school.json`, `fixtures/department-cases.json`, `fixtures/seed.sql`에 합성 설정·후보 추출 기대값·데이터를 준비했다. 같은 학과 순위·전원 양방향 성별 조건·편도·MVP 보상 비활성은 기존 설계 기본값을 유지한다. 지도 공급자 선정은 아직 진행하지 않았다.
 
@@ -64,7 +64,7 @@
 - [x] Authorization Code, state·nonce·브라우저 바인딩, PKCE와 ID token claim/JWKS 서명 검증 구현. 합성 provider를 통한 Workers 회귀 통과; 실제 Google provider 시험은 대기.
 - [x] 검증된 `hd`와 이메일 도메인 allowlist를 서버에서 검사.
 - [x] 세션 해시 저장·HttpOnly 쿠키·로그아웃·유휴/절대 만료·CSRF/Origin 검증 구현.
-- [x] PENDING·VERIFIED·만료·수동 운영자 검토 API 구현. 학교 승인 명부 연동은 미정.
+- [x] 학교 Google OIDC 인증 성공 시 `SCHOOL_ASSERTION`으로 자격을 즉시 부여하고 7일 만료 시 재인증한다. 로컬 수동 검토·기존 대기열 경로는 유지한다.
 - [x] 학교 설정 가능한 안전한 토큰 템플릿·별칭·UNKNOWN 파싱·파서 버전 구현. 실제 학교 포맷 fixture 검증은 외부 설정 후 수행.
 - [x] 닉네임·성별·확인 상태와 약관/개인정보 동의를 화면에 연결하고 최신 정책 버전을 서버에서 확인. 실제 정책 URL·내용은 외부 설정 전까지 원격 환경 차단.
 - [x] 운영자 판단은 서버의 ADMIN 역할·DB trigger로 보호하고 일반 프로필 API에서 역할 수정 차단.
@@ -72,11 +72,13 @@
 
 **로컬 검증 결과:** `npm run test:unit` 6개, `npm run test:integration` 23개, `npm run test:e2e` 2개 통과. Workers/D1 통합은 합성 Google discovery·토큰·JWKS를 사용해 유효/위조 서명, issuer·audience·nonce·만료, email/`hd`, state 재사용·다른 브라우저, 정지/만료 계정, CSRF, 관리자 trigger, 동의 버전·철회와 학과 파서를 확인했다. `npm run lint`, `typecheck`, `build`, 로컬 migration도 통과했다.
 
-**외부 검증 대기:** 가천대학교 메일 도메인은 `gachon.ac.kr`로 정해졌지만 실제 Google Workspace `hd` claim, OAuth client/secret, 단일 캠퍼스, 현재 학생 확인 방식, 학과 규칙, 실제 정책 URL·내용은 미확정이다. 실제 provider·학교 데이터·원격 staging 시험은 하지 않았으므로 AC-01/AC-02의 학교 연동 완료를 주장하지 않는다.
+**외부 검증 대기:** 학교 계정 자체를 이용 자격으로 삼는 정책은 결정됐고 로컬 코드에 반영했다. 실제 Google Workspace `hd` claim, OAuth client/secret, 단일 캠퍼스, 학과 규칙, 실제 정책 URL·내용은 미확정이다. 실제 provider·학교 데이터·원격 staging 시험은 하지 않아 OIDC staging 동작 완료를 주장하지 않는다.
 
-**완료 기준:** AC-01·AC-02를 통과하고 확인 대기 계정은 프로필/확인 경로만 접근한다. 학과 후보 추출과 검증된 학과가 화면·DB에서 구분된다.
+**완료 기준:** AC-01·AC-02를 통과하고, Gachon OIDC 인증 계정은 동의 완료 후 즉시 학생 기능을 사용할 수 있다. 학과 후보 추출과 검증된 학과가 화면/DB에서 구분된다.
 
-구현 진척: [Architecture §15](Architecture.md)의 인증·수동 확인·버전형 약관/개인정보 동의 경로와 합성 provider 회귀 검증을 작성했다. Google client/secret·실제 Workspace `hd`·캠퍼스·학생 확인 절차·정책 URL/내용·운영자 계정이 미제공이어서 운영 접근은 계속 닫혀 있다.
+구현 진척: [Architecture §15](Architecture.md)의 인증·Google 계정 기반 자동 자격 부여·버전형 약관/개인정보 동의 경로와 합성 provider 회귀 검증을 작성했다. Google client/secret·실제 Workspace `hd`·캠퍼스·정책 URL/내용·운영자 계정이 미제공이어서 원격 접근은 계속 닫혀 있다.
+
+2026-10-28 추가: 가천대학교 OIDC 검증에 성공하면 `SCHOOL_ASSERTION` 확인 기록과 7일짜리 `VERIFIED` 자격을 D1 batch로 함께 저장하고, 재인증 때 갱신하도록 구현했다. 자격 만료 뒤 늦은 재인증은 기존 운행/요청 정리 후 자격을 갱신한다. 비가천 이메일 assertion은 D1 trigger에서 거절한다. 단위 24개, Workers/D1 통합 47개, lint, typecheck, build가 통과했다. 실제 Google 계정·staging은 아직 검증하지 않았다.
 
 ## 5. P3 — 운행과 요청의 수명주기
 
@@ -217,4 +219,4 @@
 
 **현재 완료:** 네 설계 문서, P1~P4 로컬 구현, P5 위치 공유 핵심 흐름과 가상 위치도, P6 신고·학생 차단·운영자 정지·자격 만료 정리, 확인 대기열, 지점·노선 운영, 동의 설정과 계정 탈퇴 1차, Cron 정리 관측·한정 재시도. Cloudflare staging D1/Worker 생성, 16개 migration, 안전하게 닫힌 staging 배포. Private GitHub 저장소 `JooJeongwon/campus-ride` 생성과 `origin` 연결. React/Vite·Hono·Zod·strict TypeScript, D1 migration·합성 seed/로컬 리셋, 보호 API·Workers/D1 검증·CI 설정.
 
-**다음 실제 작업:** 가천대학교에서 사용할 단일 캠퍼스와 Workspace `hd`를 확인한다. `gachon.ac.kr` 학교 Google 계정으로 가입해도 현재 학생 확인 전에는 `PENDING`으로 유지한다. 학과 규칙·승하차 지점·정책 문구/URL·학생 및 운전자 확인 담당자·OAuth 자격을 확보한 뒤 staging API를 제한적으로 연다. 운영 주체는 법적 보관기간과 탈퇴 데이터 복구·재적용 절차도 승인해야 한다. 그 전까지 탈퇴 이력·Time Travel 데이터의 즉시 완전 삭제는 보장하지 않는다. 지도 공급자 계정·canonical 도메인·사용량 한도·캠퍼스 적합성을 확인한 뒤 SDK를 결정한다. Workers Free 로그 한도 변경은 2026-12-01부터 적용되므로 운영 전 사용량을 점검한다. Production D1/Worker는 만들지 않았다.
+**다음 실제 작업:** 가천대학교에서 사용할 단일 캠퍼스와 Workspace `hd`를 확인한다. 학과 규칙·승하차 지점·정책 문구/URL·운전자 확인 담당자·OAuth 자격을 확보한 뒤 staging API를 제한적으로 연다. 운영 주체는 법적 보관기간과 탈퇴 데이터 복구·재적용 절차도 승인해야 한다. 그 전까지 탈퇴 이력·Time Travel 데이터의 즉시 완전 삭제는 보장하지 않는다. 지도 공급자 계정·canonical 도메인·사용량 한도·캠퍼스 적합성을 확인한 뒤 SDK를 결정한다. Workers Free 로그 한도 변경은 2026-12-01부터 적용되므로 운영 전 사용량을 점검한다. Production D1/Worker는 만들지 않았다.

@@ -20,7 +20,7 @@ it('allows local development auth on localhost and blocks remote auth bypass', (
     APP_ENV: 'staging', APP_ORIGIN: 'https://ride.school.edu', SCHOOL_CONFIG_READY: 'true', ALLOW_DEV_AUTH: 'true',
     SCHOOL_ID: 'school-1', CAMPUS_ID: 'campus-1',
     ALLOWED_EMAIL_DOMAINS: 'gachon.ac.kr', ALLOWED_HOSTED_DOMAINS: 'students.school.edu',
-    STUDENT_VERIFICATION_MODE: 'MANUAL_REVIEW', DEPARTMENT_SOURCE_FIELD: 'EMAIL_LOCAL_PART',
+    STUDENT_VERIFICATION_MODE: 'SCHOOL_ASSERTION', DEPARTMENT_SOURCE_FIELD: 'EMAIL_LOCAL_PART',
     DEPARTMENT_TEMPLATE: 'student-{id}-{department}', DEPARTMENT_PARSER_VERSION: 'school-v1',
     DEPARTMENT_ALIASES_JSON: '{"cs":"CS"}', GOOGLE_CLIENT_ID: 'client.apps.googleusercontent.com',
     GOOGLE_CLIENT_SECRET: 'school-secret', CSRF_HMAC_KEY: 'a'.repeat(32), BOARDING_HMAC_KEY: 'b'.repeat(32),
@@ -33,6 +33,7 @@ it('allows local development auth on localhost and blocks remote auth bypass', (
   };
   expect(environmentSchema.safeParse(remote).success).toBe(false);
   expect(environmentSchema.safeParse({ ...remote, ALLOW_DEV_AUTH: 'false' }).success).toBe(true);
+  expect(environmentSchema.safeParse({ ...remote, ALLOW_DEV_AUTH: 'false', STUDENT_VERIFICATION_MODE: 'MANUAL_REVIEW' }).success).toBe(false);
   expect(environmentSchema.safeParse({ ...remote, ALLOW_DEV_AUTH: 'false', ALLOWED_EMAIL_DOMAINS: 'students.school.edu' }).success).toBe(false);
   expect(environmentSchema.safeParse({ ...remote, ALLOW_DEV_AUTH: 'false', ALLOWED_EMAIL_DOMAINS: 'gachon.ac.kr,other.school.edu' }).success).toBe(false);
   expect(environmentSchema.safeParse({ ...remote, POLICY_LOCATION_SHARING_URL: undefined }).success).toBe(false);

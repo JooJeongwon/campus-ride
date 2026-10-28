@@ -26,6 +26,7 @@ export type Session = {
 
 const encoder = new TextEncoder();
 const devCsrfKey = 'development-only-campus-ride-csrf-key-not-for-deploy';
+export const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export async function sha256(value: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', encoder.encode(value));
@@ -58,15 +59,14 @@ async function verifyCsrf(env: Bindings, token: string, csrf: string): Promise<b
   }
 }
 
-export async function createSession(c: AppContext, userId: string): Promise<void> {
+export async function createSession(c: AppContext, userId: string, now = Date.now()): Promise<void> {
   const token = randomToken();
   const tokenHash = await sha256(token);
   const csrf = await csrfToken(c.env, token);
-  const now = Date.now();
   await c.env.DB.prepare(`INSERT INTO sessions
     (token_hash,user_id,csrf_hash,created_at,last_seen_at,expires_at)
-    VALUES(?,?,?,?,?,?)`).bind(tokenHash, userId, await sha256(csrf), now, now, now + 7 * 24 * 60 * 60 * 1000).run();
-  setCookie(c, cookieName(c.env, 'session'), token, { ...cookieOptions(c.env), maxAge: 7 * 24 * 60 * 60 });
+    VALUES(?,?,?,?,?,?)`).bind(tokenHash, userId, await sha256(csrf), now, now, now + SESSION_MAX_AGE_MS).run();
+  setCookie(c, cookieName(c.env, 'session'), token, { ...cookieOptions(c.env), maxAge: SESSION_MAX_AGE_MS / 1000 });
 }
 
 async function createReverificationSession(c: AppContext, session: Session, now: number) {

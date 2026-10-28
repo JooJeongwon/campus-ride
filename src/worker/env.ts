@@ -121,8 +121,8 @@ export const environmentSchema = z.object({
   if (Object.values(value).some((entry) => typeof entry === 'string' && /^(synthetic|replace|test|demo|your-|placeholder|example)/i.test(entry))) {
     context.addIssue({ code: 'custom', message: 'Placeholder configuration cannot enable a remote environment' });
   }
-  if (value.STUDENT_VERIFICATION_MODE !== 'MANUAL_REVIEW') {
-    context.addIssue({ code: 'custom', message: 'Only configured manual student review is available' });
+  if (value.STUDENT_VERIFICATION_MODE !== 'SCHOOL_ASSERTION') {
+    context.addIssue({ code: 'custom', message: 'Remote student access must use the verified school Google account' });
   }
   const template = value.DEPARTMENT_TEMPLATE;
   if (template && (template.length > 128 || template.split('{department}').length !== 2

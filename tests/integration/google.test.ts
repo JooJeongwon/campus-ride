@@ -61,9 +61,9 @@ async function beginLogin(
     SCHOOL_CONFIG_READY: 'true',
     SCHOOL_ID: 'synthetic-school',
     CAMPUS_ID: 'synthetic-campus',
-    ALLOWED_EMAIL_DOMAINS: 'students.school.edu',
-    ALLOWED_HOSTED_DOMAINS: 'students.school.edu',
-    STUDENT_VERIFICATION_MODE: 'MANUAL_REVIEW',
+    ALLOWED_EMAIL_DOMAINS: 'gachon.ac.kr',
+    ALLOWED_HOSTED_DOMAINS: 'gachon.ac.kr',
+    STUDENT_VERIFICATION_MODE: 'SCHOOL_ASSERTION',
     DEPARTMENT_SOURCE_FIELD: departmentSource,
     DEPARTMENT_TEMPLATE: 'student-{id}-{department}',
     DEPARTMENT_PARSER_VERSION: 'test-v1',
@@ -107,9 +107,9 @@ async function beginLogin(
       iss: issuer,
       aud: clientId,
       sub: `test-sub-${crypto.randomUUID()}`,
-      email: `student-${suffix}-cs@students.school.edu`,
+      email: `student-${suffix}-cs@gachon.ac.kr`,
       email_verified: true,
-      hd: 'students.school.edu',
+      hd: 'gachon.ac.kr',
       name: '합성 테스트 학생',
       iat: now,
       exp: now + 600,
@@ -133,19 +133,28 @@ async function beginLogin(
   }
 }
 
-it('validates Google OIDC and creates a pending profile with a bound browser session', async () => {
+it('validates Google OIDC and immediately verifies a Gachon account with a bound browser session', async () => {
   const flow = await beginLogin();
   try {
     const callback = await flow.callback();
     expect(callback.status).toBe(302);
     expect(callback.headers.get('Location')).toBe('/profile?tab=consent');
     expect(callback.headers.get('Set-Cookie')).toContain('campus_session=');
-    const user = await env.DB.prepare(`SELECT affiliation_status AS affiliation,gender,department_status AS department,
+    const user = await env.DB.prepare(`SELECT id,affiliation_status AS affiliation,verified_until AS verifiedUntil,gender,department_status AS department,
       department_id AS departmentId,department_source AS departmentSource,parser_version AS parserVersion
       FROM users WHERE google_sub=?`).bind(flow.tokenClaims.sub)
-      .first<{ affiliation: string; gender: string; department: string; departmentId: string; departmentSource: string; parserVersion: string }>();
-    expect(user).toEqual({ affiliation: 'PENDING', gender: 'UNDISCLOSED', department: 'UNVERIFIED',
+      .first<{ id: string; affiliation: string; verifiedUntil: number; gender: string; department: string; departmentId: string; departmentSource: string; parserVersion: string }>();
+    expect(user).toMatchObject({ affiliation: 'VERIFIED', gender: 'UNDISCLOSED', department: 'UNVERIFIED',
       departmentId: '10000000-0000-4000-8000-000000000001', departmentSource: 'EMAIL_LOCAL_PART', parserVersion: 'test-v1' });
+    expect(user?.verifiedUntil).toBeGreaterThan(Date.now());
+    expect(user?.verifiedUntil).toBeLessThanOrEqual(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    expect(await env.DB.prepare(`SELECT method,outcome FROM student_verifications WHERE user_id=? ORDER BY created_at DESC LIMIT 1`)
+      .bind(user?.id).first()).toEqual({ method: 'SCHOOL_ASSERTION', outcome: 'VERIFIED' });
+    await expect(env.DB.prepare(`INSERT INTO student_verifications
+      (id,user_id,method,outcome,verified_at,valid_until,created_at)
+      VALUES(?,?,'SCHOOL_ASSERTION','VERIFIED',?,?,?)`)
+      .bind(crypto.randomUUID(), '20000000-0000-4000-8000-000000000003', Date.now(), Date.now() + 7 * 24 * 60 * 60 * 1000, Date.now()).run())
+      .rejects.toThrow('SCHOOL_GOOGLE_ASSERTION_INVALID');
     const replay = await flow.callback();
     expect(replay.status).toBe(401);
     expect((await replay.text())).not.toContain(flow.tokenClaims.email as string);
@@ -177,7 +186,7 @@ it.each([
 });
 
 it('keeps unknown departments unverified and supports the configured Google-name parser input', async () => {
-  const unknown = await beginLogin({ email: 'student-123-unknown@students.school.edu' });
+  const unknown = await beginLogin({ email: 'student-123-unknown@gachon.ac.kr' });
   try {
     expect((await unknown.callback()).status).toBe(302);
     const user = await env.DB.prepare('SELECT department_id AS departmentId,department_status AS status FROM users WHERE google_sub=?')
@@ -211,6 +220,8 @@ it('blocks suspended identities and projects expired student status on reauthent
 
   await env.DB.prepare("UPDATE users SET account_status='ACTIVE',affiliation_status='VERIFIED',verified_until=? WHERE id=?")
     .bind(Date.now() - 1000, rider).run();
+  await env.DB.prepare(`INSERT INTO student_verifications (id,user_id,method,outcome,created_at)
+    VALUES(?,?,'MANUAL_REVIEW','PENDING',?)`).bind(crypto.randomUUID(), rider, Date.now()).run();
   const expired = await beginLogin({ sub: 'synthetic-rider' });
   try {
     const callback = await expired.callback();
@@ -219,7 +230,11 @@ it('blocks suspended identities and projects expired student status on reauthent
     expect(cookie).toBeDefined();
     const profileResponse = await expired.profile(cookie!);
     const profile = await profileResponse.json() as { data: { affiliation: { status: string } } };
-    expect(profile.data.affiliation.status).toBe('EXPIRED');
+    expect(profile.data.affiliation.status).toBe('VERIFIED');
+    expect(await env.DB.prepare('SELECT verified_until FROM users WHERE id=?').bind(rider).first<number>('verified_until'))
+      .toBeGreaterThan(Date.now());
+    expect(await env.DB.prepare("SELECT outcome FROM student_verifications WHERE user_id=? AND method='MANUAL_REVIEW'")
+      .bind(rider).first<string>('outcome')).toBe('EXPIRED');
   } finally {
     expired.close();
   }
