@@ -1,6 +1,6 @@
 # 개발 에이전트 작업 규칙
 
-이 파일은 구현 저장소 루트에 적용되는 개발 지침이다. P1~P4 로컬 구현, P5 위치 공유·가상 위치도, P6 로컬 기능과 staging D1/Worker 배포가 있다. Staging D1 backend는 `production`이며 region은 APAC이고 16개 migration이 적용됐다. 학교·정책 설정이 미확정이라 staging API는 503으로 닫혀 있다. 실제 계정 플랜, 복구/보관·로그 보존 정책, 지도 공급자·위치 정책·모바일 실기기와 운영 설정은 남아 있다. 작업 전 Roadmap의 최신 완료 상태와 실제 코드를 함께 확인한다. 기존 지침과 사용자 지시의 적용 범위를 먼저 확인한다.
+이 파일은 구현 저장소 루트에 적용되는 개발 지침이다. P1~P4 로컬 구현, P5 위치 공유·가상 위치도, P6 로컬 기능과 staging D1/Worker 배포가 있다. Staging D1 backend는 `production`이며 region은 APAC이고 16개 migration이 적용됐다. 운영자는 Workers Free이며 도메인 등록은 별도 결제라고 확인했다. Free D1 Time Travel은 7일이고 Workers 로그의 보존·한도는 Roadmap §8/Architecture §30에 기록했다. 학교·정책 설정이 미확정이라 staging API는 503으로 닫혀 있다. 서비스의 데이터 보관·복구 정책, 실제 로그 사용량, 지도 공급자·위치 정책·모바일 실기기와 운영 설정은 남아 있다. 작업 전 Roadmap의 최신 완료 상태와 실제 코드를 함께 확인한다. 기존 지침과 사용자 지시의 적용 범위를 먼저 확인한다.
 
 ## 1. 읽는 순서와 작업 원칙
 

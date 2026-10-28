@@ -1,6 +1,6 @@
 # 교내 동승 매칭 웹앱 — Roadmap
 
-작성일: 2026-10-28 · 상태: **P0 외부 정보 대기, P1~P4 로컬 구현, P5 위치 공유·가상 위치도 구현 및 공급자 문서 비교, P6 로컬 구현 및 staging D1/Worker 연결·migration 적용; 계정 플랜·보관 정책·실기기·학교 정책 검증 대기**
+작성일: 2026-10-28 · 상태: **P0 외부 정보 대기, P1~P4 로컬 구현, P5 위치 공유·가상 위치도 구현 및 공급자 문서 비교, P6 로컬 구현 및 staging D1/Worker 연결·migration 적용; Workers Free 사용자 확인, 서비스 보관·복구 승인·실기기·학교 정책 검증 대기**
 
 이 문서는 [Project.md](Project.md)의 요구사항을 [Architecture.md](Architecture.md)의 구조로 구현하기 위한 순서다. [AGENTS.md](AGENTS.md)의 검증·보안·작업 규칙을 적용한다. 일정과 담당자는 팀 구성 후 정하며 아래 체크박스는 실제 완료 전까지 체크하지 않는다.
 
@@ -147,11 +147,12 @@
 - [x] 학생 자격 만료·계정 정지가 진행 중 요청/운행에 미치는 처리를 구현한다.
 - [x] 지점·노선·학생/운전자 확인용 최소 운영 UI와 권한을 구현한다.
 - [x] 개인정보·위치 수집/상대 제공·철회·계정 삭제 화면을 완성한다.
-- [ ] 실제 Cloudflare 계정의 D1 요금제·복구 설정을 확인하고, 복구 시 탈퇴 전 데이터가 되살아날 위험을 포함해 보관·삭제·복구 절차를 승인한다. (staging D1 backend는 `production`, 실행 region은 APAC으로 확인. 계정 플랜과 법적 절차는 미확정. 공식 문서의 일반 Time Travel 창은 Free 7일/Paid 30일)
+- [x] 운영자 확인으로 Workers Free 플랜을 기록하고, staging D1의 `production` backend·APAC region·현재 Time Travel bookmark를 확인한다. 공식 Free Time Travel 복구 창은 7일이다.
+- [ ] 복구로 탈퇴 전 정보가 되살아날 위험을 포함해 서비스의 보관·삭제·복구 절차를 승인한다. 법적 보관기간과 계정별 삭제 정책은 임의로 정하지 않는다.
 - [ ] 법적 확인자료·제공 기록이 필요한 경우 일반 audit와 구분해 추가한다.
 - [x] Worker 응답에 동일 origin CSP·위치 Permissions-Policy를 적용하고, 사용자별 요청/코드 제한을 확인한다. Worker 애플리케이션 로그는 민감값을 출력하지 않는다.
 - [x] Wrangler에서 query string redaction과 invocation URL 로그 비활성화를 설정하고, Cron 정리 성공/지연/실패를 안전한 구조화 로그로 남긴다.
-- [ ] 실제 Cloudflare 계정에서 로그 보존기간·비용을 확인한다.
+- [x] 운영자가 확인한 Workers Free 플랜의 로그 한도·보존·비용 조건을 공식 문서와 staging 설정에 대조한다. 2026-11-30까지 200,000 이벤트/일·3일 보존, 2026-12-01부터 무료 0.5GB/일·7일 보존이며 Free 한도 초과 시 수집이 중단된다. 실제 사용량은 측정하지 않았다.
 - [x] 정리 작업은 실행당 기존 배치 한도를 지키고, 실패한 정리 패스를 한 번만 재시도한다.
 - [x] 정리 시각과 무관하게 세션 사용 시 자격 만료를 처리하고 제한된 API 접근이 거절되는지 Workers/D1에서 확인한다.
 
@@ -175,7 +176,7 @@
 
 2026-10-28 추가: Cron 정리 작업은 예정 시각 지연·실행 시간·결과·고정된 실패 단계를 구조화 로그로 남기고, D1 실패 시 기존 행 한도 안에서 전체 패스를 한 번 재시도한다. Wrangler 관측 로그를 켜고 invocation URL 로그는 비활성화했으며 query string redaction을 적용했다. Workers/D1 통합 47개, typecheck, lint, build 통과. 실제 계정 로그 보존/비용 확인은 남아 있다.
 
-2026-10-28 추가: 연결된 Cloudflare 계정에 대해 읽기 전용 확인을 했을 때 프로젝트 리소스는 없었다. 이후 staging 인프라 생성 요청에 따라 `campus-ride-staging` D1/Worker를 만들고 D1에 16개 migration을 적용했다. D1 backend는 `production`, 실행 region은 APAC, jurisdiction은 미설정이다. 현재 Worker 설정 조회에서 DB 바인딩 연결, observability/logs 활성화, query redaction, invocation URL 비활성, persist를 확인했다. D1 bookmark 조회 API가 현재 bookmark를 반환해 현재 복구점 존재를 확인했지만, 생성일과 같은 날이라 보존 창 길이는 확인할 수 없다. 구독/플랜 조회는 연결된 OAuth 토큰에 `Billing Read` scope가 없어 403으로 실패했다. 학교 준비/개발 인증은 false이며 확인된 API 요청은 503으로 닫혀 있다. 합성 seed나 학교 데이터는 올리지 않았다. 플랜·비용·로그 보존과 보관/복구 절차 승인이 미확정이라 P6 계정 정책 체크와 P7 복구 시험은 미완료다.
+2026-10-28 추가: 연결된 Cloudflare 계정에 대해 staging Worker/D1 설정을 읽기 전용으로 확인했다. `campus-ride-staging` D1에 16개 migration이 적용됐고 backend는 `production`, region은 APAC, jurisdiction은 미설정이다. 운영자가 Workers Free 플랜이며 도메인 등록은 별도 결제라고 확인했다. 현재 Time Travel bookmark도 조회했다. 공식 문서상 Free 복구 창은 7일이다. Worker는 DB 바인딩 연결, observability/logs 활성화, query redaction, invocation URL 비활성, persist 설정을 갖췄다. Workers Free 로그는 2026-11-30까지 200,000 이벤트/일·3일 보존, 2026-12-01부터 무료 0.5GB/일·7일 보존으로 전환된다. Billing Read API 권한이 없어 플랜을 API로 독립 확인하거나 실제 사용량을 조회하지는 못했으나 운영자 제공 정보를 기준으로 plan-level 항목을 기록했다. 보관·복구 절차 승인과 법적 보관기간은 남아 P6 미완료다. 학교 준비/개발 인증은 false이며 staging API는 503으로 닫혀 있다. 합성 seed나 학교 데이터는 올리지 않았다.
 
 ## 9. P7 — staging 배포와 통합 검증
 
@@ -213,4 +214,4 @@
 
 **현재 완료:** 네 설계 문서, P1~P4 로컬 구현, P5 위치 공유 핵심 흐름과 가상 위치도, P6 신고·학생 차단·운영자 정지·자격 만료 정리, 확인 대기열, 지점·노선 운영, 동의 설정과 계정 탈퇴 1차, Cron 정리 관측·한정 재시도. Cloudflare staging D1/Worker 생성, 16개 migration, 안전하게 닫힌 staging 배포. Private GitHub 저장소 `JooJeongwon/campus-ride` 생성과 `origin` 연결. React/Vite·Hono·Zod·strict TypeScript, D1 migration·합성 seed/로컬 리셋, 보호 API·Workers/D1 검증·CI 설정.
 
-**다음 실제 작업:** Cloudflare 계정 플랜·로그 보존/비용과 탈퇴 후 과거 복구로 삭제 정보가 되살아날 때의 처리 절차, 법적 보관기간을 운영 주체가 확정한다. 그 전까지 탈퇴 이력·Time Travel 데이터의 즉시 완전 삭제는 보장하지 않는다. 법적 고지·보관기간·제공 기록은 임의로 정하지 않는다. 실제 학교별 지점·노선은 확인된 값만 사용한다. 운영 주체가 지도 공급자 계정, canonical 도메인, 사용량·비용 한도와 캠퍼스 적합성을 확인하면 SDK를 결정한다. 실제 위치 정책 URL/문구·학교 도메인·Workspace `hd`·학과 규칙·학생 확인 담당자·OAuth 자격은 staging 실제 로그인 및 P7 사용자 시험 전에 필요하다. Production D1/Worker는 만들지 않았다.
+**다음 실제 작업:** 운영 주체가 법적 보관기간과 탈퇴 데이터 복구·재적용 절차를 승인한다. 그 전까지 탈퇴 이력·Time Travel 데이터의 즉시 완전 삭제는 보장하지 않는다. 실제 학교별 지점·노선은 확인된 값만 사용한다. 운영 주체가 지도 공급자 계정, canonical 도메인, 사용량 한도와 캠퍼스 적합성을 확인하면 SDK를 결정한다. 실제 위치 정책 URL/문구·학교 도메인·Workspace `hd`·학과 규칙·학생 확인 담당자·OAuth 자격은 staging 실제 로그인 및 P7 사용자 시험 전에 필요하다. Workers Free 로그 한도 변경은 2026-12-01부터 적용되므로 운영 전 사용량을 점검한다. Production D1/Worker는 만들지 않았다.
