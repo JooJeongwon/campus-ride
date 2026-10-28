@@ -1,6 +1,6 @@
 # 개발 에이전트 작업 규칙
 
-이 파일은 구현 저장소 루트에 적용되는 개발 지침이다. P1~P4 로컬 구현, P5 위치 공유·가상 위치도, P6 로컬 기능과 staging D1/Worker 배포가 있다. 대상 학교는 가천대학교 하나, 메일 도메인은 `gachon.ac.kr`이며 학교 선택 UI는 두지 않는다. Staging D1 backend는 `production`이며 region은 APAC이고 16개 migration이 적용됐다. 운영자는 Workers Free이며 도메인 등록은 별도 결제라고 확인했다. Free D1 Time Travel은 7일이고 Workers 로그의 보존·한도는 Roadmap §8/Architecture §30에 기록했다. 가천대학교 Workspace 계정을 OIDC로 정상 인증하면 현재 재학생 심사 없이 이용 가능하며, 자격은 세션과 함께 최대 7일 유효하고 Google 재인증 시 갱신한다. 학교·정책 설정이 미확정이라 staging API는 503으로 닫혀 있다. 단일 캠퍼스·실제 Workspace `hd`·서비스의 데이터 보관/복구 정책·실제 로그 사용량·지도 공급자·위치 정책·모바일 실기기와 운영 설정은 남아 있다. 작업 전 Roadmap의 최신 완료 상태와 실제 코드를 함께 확인한다. 기존 지침과 사용자 지시의 적용 범위를 먼저 확인한다.
+이 파일은 구현 저장소 루트에 적용되는 개발 지침이다. P1~P4 로컬 구현, P5 위치 공유·가상 위치도, P6 로컬 기능과 staging D1/Worker 배포가 있다. 대상 학교는 가천대학교 하나, 메일 도메인은 `gachon.ac.kr`이며 학교 선택 UI는 두지 않는다. 공식 캠퍼스는 글로벌(성남)과 메디컬(인천)이며 첫 서비스 캠퍼스는 미정이다. Staging D1 backend는 `production`이며 region은 APAC이고 16개 migration이 적용됐다. 운영자는 Workers Free이며 도메인 등록은 별도 결제라고 확인했다. Free D1 Time Travel은 7일이고 Workers 로그의 보존·한도는 Roadmap §8/Architecture §30에 기록했다. 가천대학교 Workspace 계정을 OIDC로 정상 인증하면 현재 재학생 심사 없이 이용 가능하며, 자격은 세션과 함께 최대 7일 유효하고 Google 재인증 시 갱신한다. 학교·정책 설정이 미확정이라 staging API는 503으로 닫혀 있다. 실제 Workspace `hd`·서비스의 데이터 보관/복구 정책·실제 로그 사용량·지도 공급자·위치 정책·모바일 실기기와 운영 설정은 남아 있다. 작업 전 Roadmap의 최신 완료 상태와 실제 코드를 함께 확인한다. 기존 지침과 사용자 지시의 적용 범위를 먼저 확인한다.
 
 ## 1. 읽는 순서와 작업 원칙
 
