@@ -148,9 +148,11 @@ Google Auth Platform 콘솔: [campus-ride-gachon](https://console.cloud.google.c
 
 **완료 기준:** AC-07·AC-08을 통과한다. 화면이 오래된 좌표를 현재 좌표로 표시하지 않으며, GPS로 실제 탑승을 자동 판정하지 않는다.
 
-현재 로컬 구현은 위 핵심 흐름과 D1 권한 검증, 승차 지점 기준의 SVG 가상 위치도를 갖췄지만 P5는 미완료다. 30초 넘게 갱신되지 않은 점은 위치도에서 숨기며, 가상 위치도는 실제 도로·경로·거리 안내를 제공하지 않는다. NAVER Maps·Kakao Maps·Google Maps의 공식 웹 설정 및 계정/과금 조건 비교는 마쳤고 [Architecture §22](Architecture.md)에 근거를 기록했다. 다만 실제 운영 계정·도메인·사용량·정책 정보가 없어 공급자 선택과 SDK 연결은 보류한다. 정책 URL과 고지, iOS Safari·Android Chrome 실기기 시험도 남아 P5 완료 기준 전에 확정·검증하고 결과를 기록한다.
+현재 로컬 구현은 위 핵심 흐름과 D1 권한 검증, 승차 지점 기준의 SVG 가상 위치도를 갖췄지만 P5는 미완료다. 30초 넘게 갱신되지 않은 점은 위치도에서 숨기며, 가상 위치도는 실제 도로·경로·거리 안내를 제공하지 않는다. [Architecture §22](Architecture.md)에 2026-10-28 기준 공식 쿼터·요금 비교를 갱신했다. Cloudflare zone `jwjoo.com`은 활성 상태지만 Campus Ride custom hostname은 없다. 운영 지도 계정의 free/primary-app 자격, 호스트명, 사용량 상한, 실제 캠퍼스 지도 적합성은 미확정이라 SDK 연결은 보류한다. 정책 URL과 고지, iOS Safari·Android Chrome 실기기 시험도 남아 P5 완료 기준 전에 확정·검증하고 결과를 기록한다.
 
 2026-10-28 추가: `0018_location_disclosures.sql`과 위치 API/UI를 연결했다. 새 위치 sequence가 상대 화면에 처음 응답될 때 좌표를 복사하지 않고 수신자 ID·닉네임/역할 스냅샷·운행/요청·sequence·목적·시각을 기록하며, 위치 소유자 화면은 현재 활동의 최근 20건을 인앱으로 알린다. 동일 sequence 반복 조회는 중복 기록하지 않고 통지 확인 여부도 저장하지 않는다. 6개월 정리는 임시 로컬 기준이며 운영자 적용 여부와 더 긴 보관 필요성은 미확정이다. 따라서 법률상 매회 통지/확인자료 요건을 충족했다고 보지 않으며 P5 미완료다. 테스트·실기기 검증은 실행하지 않았다.
+
+2026-10-28 추가: 공식 지도 문서를 다시 확인해 Kakao Maps Web SDK(첫 활성 앱일 때만 무료; 문서상 일 300,000 SDK calls, 월 3,000,000 API calls), NAVER primary account 무료 사용, Google Maps 월 10,000 Dynamic Maps 무료 사용과 billing 요구를 Architecture §22에 반영했다. 소규모 웹 파일럿은 Kakao 무료쿼터 자격 확인을 전제로 우선 후보로 권고했으며 공급자를 확정하지 않았다. Cloudflare 읽기 전용 확인에서 `jwjoo.com` zone 활성과 기존 `canvas.jwjoo.com` 연결만 확인했고 Campus Ride hostname은 없었다. 공급자 계정 상태·도메인명·예산·캠퍼스 적합성 확인 전에는 키를 만들거나 SDK를 연결하지 않는다.
 
 2026-10-27: 위치 동의·수락 관계 위치 API·D1 출발/취소/철회 삭제·브라우저 공유 흐름을 구현했다. `npm run lint`, `typecheck`, `test:unit`(23), `test:integration`(37), `test:e2e`(6), `db:reset:local`, `build`가 통과했다. E2E는 새 합성 D1에서 실행했고 기존 로컬 D1을 백업 후 복원했다. 지도 설정·실제 위치 고지·모바일 실기기 시험은 미완료라 P5는 계속 진행 중이다.
 
@@ -231,4 +233,4 @@ Google Auth Platform 콘솔: [campus-ride-gachon](https://console.cloud.google.c
 
 **현재 완료:** 네 설계 문서, P1~P4 로컬 구현, P5 위치 공유 핵심 흐름과 가상 위치도, P6 신고·학생 차단·운영자 정지·자격 만료 정리, 확인 대기열, 지점·노선 운영, 동의 설정과 계정 탈퇴 1차, Cron 정리 관측·한정 재시도. Cloudflare staging D1/Worker 생성, 16개 migration, 안전하게 닫힌 staging 배포. Private GitHub 저장소 `JooJeongwon/campus-ride` 생성과 `origin` 연결. React/Vite·Hono·Zod·strict TypeScript, D1 migration·합성 seed/로컬 리셋, 보호 API·Workers/D1 검증·CI 설정.
 
-**다음 실제 작업:** 글로벌캠퍼스 계정으로 staging에서 실제 Workspace `hd` claim을 확인하고, 학과 규칙·승하차 지점·정책 문구/URL·운전자 확인 담당자를 확정한다. staging API는 필수 설정을 검증한 뒤 연다. 운영 주체는 법적 보관기간과 탈퇴 데이터 복구·재적용 절차도 승인해야 한다. 그 전까지 탈퇴 이력·Time Travel 데이터의 즉시 완전 삭제는 보장하지 않는다. 지도 공급자 계정·canonical 도메인·사용량 한도·캠퍼스 적합성을 확인한 뒤 SDK를 결정한다. Workers Free 로그 한도 변경은 2026-12-01부터 적용되므로 운영 전 사용량을 점검한다. Production D1/Worker는 만들지 않았다.
+**다음 실제 작업:** P5 지도 연결 전에 Campus Ride용 staging/canonical hostname을 정하고 Google OAuth callback 허용 주소와 함께 연결한다. 지도 계정의 Kakao 첫 활성 앱 무료 쿼터 또는 NAVER primary account 자격, 사용량 상한, 글로벌캠퍼스 실제 표시 품질을 확인한 뒤 SDK 후보를 확정한다. 별도로 글로벌캠퍼스 계정으로 staging에서 실제 Workspace `hd` claim을 확인하고, 학과 규칙·승하차 지점·정책 문구/URL·운전자 확인 담당자를 확정한다. staging API는 필수 설정을 검증한 뒤 연다. 운영 주체는 법적 보관기간과 탈퇴 데이터 복구·재적용 절차도 승인해야 한다. 그 전까지 탈퇴 이력·Time Travel 데이터의 즉시 완전 삭제는 보장하지 않는다. Workers Free 로그 한도 변경은 2026-12-01부터 적용되므로 운영 전 사용량을 점검한다. Production D1/Worker는 만들지 않았다.

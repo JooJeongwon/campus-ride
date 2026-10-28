@@ -391,7 +391,7 @@ trigger는 수락뿐 아니라 요청 생성의 상호 제약과 부적절한 �
 | 학교·계정 범위 | 가천대학교 글로벌캠퍼스(성남) 단일 서비스, `gachon.ac.kr` 메일, 학교 선택 UI 없음. 실제 Workspace `hd`는 staging 검증 대기 | P0/P2 |
 | 서비스 계정 자격 | 정상 인증된 가천대학교 Google 계정이면 현재 재학생 여부와 관계없이 이용 자격을 부여한다. Google 재인증 주기는 세션 만료에 맞춰 7일 | P0 사용자 결정; staging OIDC 검증 대기 |
 | 운전자 확인 수단 | 학생 계정 자격과 별도로 차량·운전자 프로필은 운영자 승인 전 `PENDING` | P0/P3, 파일럿 전 필수 |
-| 지도 공급자 | 어댑터만 확정; 공식 설정·과금 문서를 비교했으나 운영 계정·도메인·약관 미정으로 선택 보류 | P0/P5 |
+| 지도 공급자 | Kakao 우선 후보(무료 쿼터를 받을 첫 활성 앱일 때); NAVER primary 계정 여부와 대안 비교 대기. SDK 미연결 | P0/P5 |
 | 같은 학과 우선 | 검증된 학과의 추천 순위 | P0 |
 | 성별 선택 의미 | 전체 동승자 간 양방향 조건 | P0 |
 | 보상·요금 | MVP 비활성, 향후 별도 결정 | 공개 서비스/보상 도입 전 |
@@ -518,17 +518,19 @@ Workers/D1 검증은 수락과 완료의 동일 키 재시도, 다른 본문 제
 
 `tests/integration/locations.test.ts`는 합성 D1에서 무동의·비관계 업로드 거절, 승객 상호 좌표 비노출, 시각/sequence/빈도 검증, `no-store`, 취소·동의 철회 삭제를 확인한다. `tests/integration/requests.test.ts`는 출발 전 좌표를 넣고 출발 시 삭제되는지 검증한다. Chromium E2E는 합성 geolocation을 사용한 운전자·승객 위치 공유 흐름을 확인한다. 실제 지도 공급자/도메인 키, 법적 정책 URL·문구, iOS Safari·Android Chrome 실기기 검증은 미완료이며 P5 완료를 선언하지 않는다.
 
-## 22. 지도 공급자 후보 문서 검토 (2026-10-27)
+## 22. 지도 공급자 후보 문서 검토 (2026-10-28)
 
-공식 공급자 문서에서 웹 SDK의 키와 도메인 등록, 무료 사용/과금의 전제만 비교했다. 아래는 문서상 설정 조건이며 실제 학교의 지도 품질·사용량·계약 적합성 검증은 아니다.
+공식 문서는 웹 SDK 키 제한과 현재 공개된 쿼터/요금을 비교한다. 이 서비스는 정해진 두 점과 현재 위치 표시만 필요하므로 주소 검색·길찾기·장소 API는 MVP에 넣지 않는다.
 
-| 후보 | 웹 설정 조건 | 계정·비용 조건 |
+| 후보 | 웹 설정 조건 | 공개된 계정·비용 조건 |
 | --- | --- | --- |
-| NAVER Maps Web Dynamic Map | Maps Application에서 Web Dynamic Map을 선택하고 실제 Web 서비스 URL을 등록한다. [Application 설정](https://guide.ncloud-docs.com/docs/en/maps-app/) | Web Dynamic Map 무료 사용은 주 계정에만 제공된다. 사용량 제한과 알림을 콘솔에서 설정할 수 있다. |
-| Kakao Maps Web SDK | JavaScript 키에 JavaScript SDK 도메인을 등록한다. 웹 SDK에 REST 키를 사용하지 않는다. [카카오맵 시작 안내](https://developers.kakao.com/docs/ko/kakaomap/common) | 2026-07-21 이후 개발자 계정에서 처음 활성화한 앱에만 무료 쿼터가 적용된다. 다른 앱 또는 쿼터 초과에는 비즈월렛과 유료 API 설정이 필요하다. |
-| Google Maps JavaScript API | API 키에 웹 애플리케이션(HTTP referrer)과 필요한 API 제한을 설정한다. [키 발급·제한](https://developers.google.com/maps/documentation/javascript/get-api-key) | API 사용 전 결제 계정 연결이 필요하다. |
+| NAVER Maps Web Dynamic Map | Maps Application에 서비스 URL을 등록한다. [Application 설정](https://guide.ncloud-docs.com/docs/en/maps-app/) | Dynamic Map 무료 이용은 계정의 primary account에만 적용된다. 사용량 제한·알림은 콘솔에서 설정하지만 해당 계정의 실제 한도와 primary 여부는 콘솔에서 확인해야 한다. |
+| Kakao Maps Web SDK | JavaScript 키에 사용할 호스트를 등록하고 SDK에는 REST 키를 쓰지 않는다. [카카오맵 설정](https://developers.kakao.com/docs/ko/kakaomap/common) | 개발자 계정의 첫 활성 앱만 무료 쿼터 대상이다. 현재 문서상 Web SDK는 일 300,000건, 전체 API 공통 월 3,000,000건이며 추가 사용은 0.1원/건으로 안내된다. 초과 사용에는 Biz Wallet과 유료 API 활성화가 필요하다. [쿼터·요금](https://developers.kakao.com/docs/ko/getting-started/quota) |
+| Google Maps JavaScript API | API 키에 HTTP referrer와 필요한 API 제한을 설정한다. [키 제한](https://developers.google.com/maps/documentation/javascript/get-api-key) | 프로젝트별 결제 계정을 연결해야 한다. Dynamic Maps 무료 사용량은 월 10,000 map loads이며 이후 공개 global 첫 구간은 $7/1,000 loads다. [공식 가격표](https://developers.google.com/maps/billing-and-pricing/pricing) |
 
-이 저장소에서는 공급자를 선택하거나 SDK·키 설정을 추가하지 않았다. 운영 주체의 공급자 계정과 주 계정 여부, canonical/staging 도메인, 예상 호출량·비용 한도, 해당 캠퍼스의 지도 적합성, 공급자 전송 정보의 개인정보·약관 검토가 모두 미정이다. 다음 구현은 이 항목을 운영 주체가 확인한 뒤 진행하며, 그때 확정된 호스트만 SDK 도메인/HTTP referrer 제한에 등록한다. 정책 URL과 실기기 검증도 별도 P5 완료 조건으로 남는다.
+**권고(추론):** 글로벌캠퍼스의 소규모 웹 파일럿은 현재 위치·승하차 지점 마커만 사용하므로, 운영자 Kakao 계정에서 Campus Ride가 무료 쿼터를 받을 첫 활성 앱인지 확인된다면 Kakao Maps Web SDK를 우선 후보로 삼는다. 첫 앱이 아니면 NAVER primary account 여부와 콘솔 한도를 비교한다. Google은 결제 계정 연결과 월별 사용량 관리가 가능해진 뒤 검토한다. 이는 제품의 낮은 초기 범위와 공급자 공식 쿼터에서 도출한 권고이며 캠퍼스 지도 품질·약관 적합성을 시험한 결과는 아니다.
+
+Cloudflare 계정의 `jwjoo.com` zone은 활성 상태지만 Campus Ride Worker에 연결된 custom hostname은 아직 없다. 현재 staging 호스트는 `campus-ride-staging.jwjoo0512.workers.dev`다. canonical/staging hostname, 지도 계정의 첫 앱/primary 여부, 실제 사용량·비용 상한, 캠퍼스 지도 품질, 공급자 전송 정보의 개인정보·약관 검토가 미확정이므로 SDK와 키는 아직 연결하지 않는다. custom hostname을 정한 뒤에는 Google OAuth callback 허용 주소도 함께 변경해야 한다. 정책 URL과 실기기 검증은 별도 P5 완료 조건으로 남는다.
 
 ## 23. P6 신고 접수와 운영자 상태 처리 1차 (2026-10-27)
 
