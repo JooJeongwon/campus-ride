@@ -1,6 +1,6 @@
 # 교내 동승 매칭 웹앱 — Roadmap
 
-작성일: 2026-10-28 · 상태: **가천대학교 단일 대상과 `gachon.ac.kr` 메일 규칙 확정(학교 선택 UI 없음); 학교 계정 OIDC 인증자를 별도 재학생 심사 없이 허용하도록 로컬 구현; P0의 캠퍼스·학과·운영 규칙, P1~P4 로컬 구현, P5 위치 공유·가상 위치도 구현 및 공급자 문서 비교, P6 로컬 구현·staging 연결; 서비스 보관·복구 승인·실기기·학교 정책 검증 대기**
+작성일: 2026-10-28 · 상태: **가천대학교 글로벌캠퍼스 단일 운영 범위와 `gachon.ac.kr` 메일 규칙 확정(학교 선택 UI 없음); 학교 계정 OIDC 인증자를 별도 재학생 심사 없이 허용하도록 로컬 구현; P0의 Workspace·학과·운영 규칙, P1~P4 로컬 구현, P5 위치 공유·가상 위치도 구현 및 공급자 문서 비교, P6 로컬 구현·staging 연결; 서비스 보관·복구 승인·실기기·학교 정책 검증 대기**
 
 이 문서는 [Project.md](Project.md)의 요구사항을 [Architecture.md](Architecture.md)의 구조로 구현하기 위한 순서다. [AGENTS.md](AGENTS.md)의 검증·보안·작업 규칙을 적용한다. 일정과 담당자는 팀 구성 후 정하며 아래 체크박스는 실제 완료 전까지 체크하지 않는다.
 
@@ -23,7 +23,8 @@
 ## 2. P0 — 범위와 학교 규칙
 
 - [x] 대상은 가천대학교 하나, 허용 이메일 도메인은 `gachon.ac.kr`로 확정한다. 학교 선택 UI는 두지 않는다.
-- [ ] 공식 캠퍼스 안내에 기재된 글로벌캠퍼스(성남)·메디컬캠퍼스(인천) 중 첫 서비스 캠퍼스를 정하고, 실제 Google ID token의 Workspace `hd` claim을 staging 로그인으로 확인한다.
+- [x] 첫 서비스 캠퍼스는 가천대학교 글로벌캠퍼스(성남)로 정한다. 학교 선택 UI는 두지 않는다.
+- [ ] 실제 Google ID token의 Workspace `hd` claim을 staging 로그인으로 확인한다.
 - [ ] 이메일 local-part/Google 표시 이름/학교 디렉터리 중 학과 정보가 실제 존재하는 필드를 확인한다.
 - [ ] 개인정보 없는 학과 문자열 예시, 예외 포맷, 학과 코드·별칭 표를 확보한다.
 - [x] 사용자 결정: 정상 인증된 가천대학교 Google 계정이면 현재 재학 여부와 관계없이 이용을 허용한다. 실제 이메일 도메인과 Workspace `hd`는 OIDC에서 검증하고 7일 뒤 Google 재인증한다.
@@ -36,9 +37,9 @@
 
 **완료 기준:** Project의 학교별 확인 표에 실제 근거 또는 명시적 미확정 상태가 있고, 확정 정보와 가정이 구분된다. 학교가 특정되지 않아도 합성 학교 설정과 파서 fixture는 준비한다. 실제 서비스가 합법/출시 가능하다고 이 단계에서 추정 선언하지 않는다.
 
-2026-10-28: 운영자가 가천대학교 한 곳만 대상으로 하고 학교 선택 UI를 만들지 않으며, 허용 이메일 도메인을 `gachon.ac.kr`로 정했다. 이후 사용자 지시에 따라 정상 인증된 해당 학교 Google 계정 소유자는 현재 재학 여부와 무관하게 가입·이용을 허용한다. 구현은 `SCHOOL_ASSERTION` 기록으로 자격을 즉시 부여하고 세션 최대 수명인 7일 뒤 Google 재인증으로 갱신한다. Workspace `hd`, 실제 대상 캠퍼스, 학과 포맷·별칭, 승하차 지점, 운영·법적 정책은 확인이 필요하다.
+2026-10-28: 운영자가 가천대학교 한 곳만 대상으로 하고 학교 선택 UI를 만들지 않으며, 허용 이메일 도메인을 `gachon.ac.kr`로 정했다. 이후 사용자 지시에 따라 정상 인증된 해당 학교 Google 계정 소유자는 현재 재학 여부와 무관하게 가입·이용을 허용한다. 구현은 `SCHOOL_ASSERTION` 기록으로 자격을 즉시 부여하고 세션 최대 수명인 7일 뒤 Google 재인증으로 갱신한다. 사용자 결정으로 서비스 캠퍼스는 글로벌캠퍼스로 확정했다. Workspace `hd`, 학과 포맷·별칭, 승하차 지점, 운영·법적 정책은 확인이 필요하다.
 
-2026-10-28 공식 자료 확인: 가천대학교는 글로벌캠퍼스(성남)와 메디컬캠퍼스(인천)를 안내한다. 학교는 하나로 고정됐지만 현재 제품이 한 캠퍼스만 대상으로 할지, 어느 캠퍼스를 먼저 열지는 아직 정해지지 않았다. 학교 선택 UI는 계속 두지 않는다. [가천대학교 공식 캠퍼스 안내](https://www.gachon.ac.kr/eng/12692/subview.do)
+2026-10-28 공식 자료 확인: 가천대학교는 글로벌캠퍼스(성남)와 메디컬캠퍼스(인천)를 안내한다. 사용자 결정에 따라 첫 서비스 범위는 글로벌캠퍼스로 정했다. 학교 선택 UI는 두지 않는다. [가천대학교 공식 캠퍼스 안내](https://www.gachon.ac.kr/eng/12692/subview.do)
 
 2026-10-27: 실제 학교 정보·운영 담당자·학교 포맷은 제공되지 않아 위 외부 확인 항목을 미완료로 유지한다. Project §3에 미확정 상태를 명시했고 `fixtures/school.json`, `fixtures/department-cases.json`, `fixtures/seed.sql`에 합성 설정·후보 추출 기대값·데이터를 준비했다. 같은 학과 순위·전원 양방향 성별 조건·편도·MVP 보상 비활성은 기존 설계 기본값을 유지한다. 지도 공급자 선정은 아직 진행하지 않았다.
 
@@ -62,7 +63,12 @@
 
 ## 4. P2 — 인증·학생 자격·학과·설정
 
-- [ ] Google OAuth client와 정확한 redirect URI를 설정한다. staging과 운영 자격을 분리한다.
+- [x] 로그인 전용 Google Cloud 프로젝트 `campus-ride-gachon`을 현재 연결된 Google 계정에 생성한다. 기존 무관 프로젝트는 재사용하지 않는다.
+- [ ] Google Auth Platform에 앱을 등록하고 Web application client를 생성한다. 개인 Google 계정 소유 프로젝트이므로 audience는 `External`; 요청 scope는 현재 코드의 `openid email profile`만 사용한다. Support email은 동의 화면에 표시되므로 운영자가 선택한다.
+- [ ] staging client의 Authorized redirect URI를 `https://campus-ride-staging.jwjoo0512.workers.dev/api/v1/auth/google/callback`으로 등록한다. 이 서버 처리 흐름은 Authorized JavaScript origins를 사용하지 않는다. Production client는 별도로 출시 전 만든다.
+- [ ] Client ID를 staging Wrangler var로, Client secret을 staging Wrangler secret으로 저장한다. 비밀값은 저장소·로그·채팅에 넣지 않는다.
+
+Google Auth Platform 콘솔: [campus-ride-gachon](https://console.cloud.google.com/auth/overview?project=campus-ride-gachon). 현재 요청 scope만 사용하면 Google의 External/Testing test-user 제한 예외가 적용되며, 앱 서버의 `gachon.ac.kr` + Workspace `hd` 검증이 실제 접근 제한이다. [Google App Audience 안내](https://support.google.com/cloud/answer/15549945?hl=en)
 - [x] Authorization Code, state·nonce·브라우저 바인딩, PKCE와 ID token claim/JWKS 서명 검증 구현. 합성 provider를 통한 Workers 회귀 통과; 실제 Google provider 시험은 대기.
 - [x] 검증된 `hd`와 이메일 도메인 allowlist를 서버에서 검사.
 - [x] 세션 해시 저장·HttpOnly 쿠키·로그아웃·유휴/절대 만료·CSRF/Origin 검증 구현.
@@ -74,7 +80,7 @@
 
 **로컬 검증 결과:** `npm run test:unit` 6개, `npm run test:integration` 23개, `npm run test:e2e` 2개 통과. Workers/D1 통합은 합성 Google discovery·토큰·JWKS를 사용해 유효/위조 서명, issuer·audience·nonce·만료, email/`hd`, state 재사용·다른 브라우저, 정지/만료 계정, CSRF, 관리자 trigger, 동의 버전·철회와 학과 파서를 확인했다. `npm run lint`, `typecheck`, `build`, 로컬 migration도 통과했다.
 
-**외부 검증 대기:** 학교 계정 자체를 이용 자격으로 삼는 정책은 결정됐고 로컬 코드에 반영했다. 실제 Google Workspace `hd` claim, OAuth client/secret, 단일 캠퍼스, 학과 규칙, 실제 정책 URL·내용은 미확정이다. 실제 provider·학교 데이터·원격 staging 시험은 하지 않아 OIDC staging 동작 완료를 주장하지 않는다.
+**외부 검증 대기:** 학교 계정 자체를 이용 자격으로 삼는 정책과 글로벌캠퍼스 범위는 결정됐고 로컬 코드/문서에 반영했다. Google Cloud 프로젝트 `campus-ride-gachon`은 만들었으나 Google Auth Platform 앱·사용자 지원 이메일·staging OAuth client/secret·실제 Workspace `hd` claim은 미설정/미검증이다. 학과 규칙과 실제 정책 URL·내용도 미확정이다. 실제 provider·학교 데이터·원격 staging 시험은 하지 않아 OIDC staging 동작 완료를 주장하지 않는다.
 
 **완료 기준:** AC-01·AC-02를 통과하고, Gachon OIDC 인증 계정은 동의 완료 후 즉시 학생 기능을 사용할 수 있다. 학과 후보 추출과 검증된 학과가 화면/DB에서 구분된다.
 
@@ -221,4 +227,4 @@
 
 **현재 완료:** 네 설계 문서, P1~P4 로컬 구현, P5 위치 공유 핵심 흐름과 가상 위치도, P6 신고·학생 차단·운영자 정지·자격 만료 정리, 확인 대기열, 지점·노선 운영, 동의 설정과 계정 탈퇴 1차, Cron 정리 관측·한정 재시도. Cloudflare staging D1/Worker 생성, 16개 migration, 안전하게 닫힌 staging 배포. Private GitHub 저장소 `JooJeongwon/campus-ride` 생성과 `origin` 연결. React/Vite·Hono·Zod·strict TypeScript, D1 migration·합성 seed/로컬 리셋, 보호 API·Workers/D1 검증·CI 설정.
 
-**다음 실제 작업:** 가천대학교에서 사용할 단일 캠퍼스와 Workspace `hd`를 확인한다. 학과 규칙·승하차 지점·정책 문구/URL·운전자 확인 담당자·OAuth 자격을 확보한 뒤 staging API를 제한적으로 연다. 운영 주체는 법적 보관기간과 탈퇴 데이터 복구·재적용 절차도 승인해야 한다. 그 전까지 탈퇴 이력·Time Travel 데이터의 즉시 완전 삭제는 보장하지 않는다. 지도 공급자 계정·canonical 도메인·사용량 한도·캠퍼스 적합성을 확인한 뒤 SDK를 결정한다. Workers Free 로그 한도 변경은 2026-12-01부터 적용되므로 운영 전 사용량을 점검한다. Production D1/Worker는 만들지 않았다.
+**다음 실제 작업:** Google Auth Platform에서 지원 이메일을 선택하고 staging client/secret을 만든 뒤 설정한다. 이어 글로벌캠퍼스의 실제 Workspace `hd`, 학과 규칙, 승하차 지점, 정책 문구/URL·운전자 확인 담당자를 확정한다. staging API는 필수 설정을 검증한 뒤 연다. 운영 주체는 법적 보관기간과 탈퇴 데이터 복구·재적용 절차도 승인해야 한다. 그 전까지 탈퇴 이력·Time Travel 데이터의 즉시 완전 삭제는 보장하지 않는다. 지도 공급자 계정·canonical 도메인·사용량 한도·캠퍼스 적합성을 확인한 뒤 SDK를 결정한다. Workers Free 로그 한도 변경은 2026-12-01부터 적용되므로 운영 전 사용량을 점검한다. Production D1/Worker는 만들지 않았다.

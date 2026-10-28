@@ -65,7 +65,7 @@ Wrangler 구성 골격은 다음과 같다. 실제 ID·학교 설정·환경은 
 }
 ```
 
-`compatibility_date`는 실제 개발 시 지원 여부를 확인해 고정한다. 실제 dev 서버 포트도 `APP_ORIGIN`과 맞춘다. staging·production은 별도 Worker·D1·Google OAuth client·Secrets를 사용한다. staging의 실제 학생 접근은 제한된 시험 계정만 허용한다.
+`compatibility_date`는 실제 개발 시 지원 여부를 확인해 고정한다. 실제 dev 서버 포트도 `APP_ORIGIN`과 맞춘다. staging·production은 별도 Worker·D1·Google OAuth client·Secrets를 사용한다. 준비 후 staging은 정상 인증된 모든 `gachon.ac.kr` 학교 계정이 쓸 수 있으며, 현재는 OAuth 설정과 정책값이 없어 API가 닫혀 있다.
 
 공식 근거: [Static Assets](https://developers.cloudflare.com/workers/static-assets/), [Wrangler assets 설정](https://developers.cloudflare.com/workers/wrangler/configuration/#assets), [Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/). `scheduled()` 실행 지연이나 일시 실패가 있어도 요청 시점의 만료 검증은 계속 작동해야 한다.
 
@@ -384,7 +384,7 @@ trigger는 수락뿐 아니라 요청 생성의 상호 제약과 부적절한 �
 
 | 결정 | 현재 기본값 | 확정 시점 |
 | --- | --- | --- |
-| 학교·계정 범위 | 가천대학교 단일 학교, `gachon.ac.kr` 메일, 학교 선택 UI 없음. 공식 캠퍼스는 글로벌(성남)·메디컬(인천)이며 서비스 대상 캠퍼스와 실제 Workspace `hd`는 확정/검증 대기 | P0/P2 |
+| 학교·계정 범위 | 가천대학교 글로벌캠퍼스(성남) 단일 서비스, `gachon.ac.kr` 메일, 학교 선택 UI 없음. 실제 Workspace `hd`는 staging 검증 대기 | P0/P2 |
 | 서비스 계정 자격 | 정상 인증된 가천대학교 Google 계정이면 현재 재학생 여부와 관계없이 이용 자격을 부여한다. Google 재인증 주기는 세션 만료에 맞춰 7일 | P0 사용자 결정; staging OIDC 검증 대기 |
 | 운전자 확인 수단 | 학생 계정 자격과 별도로 차량·운전자 프로필은 운영자 승인 전 `PENDING` | P0/P3, 파일럿 전 필수 |
 | 지도 공급자 | 어댑터만 확정; 공식 설정·과금 문서를 비교했으나 운영 계정·도메인·약관 미정으로 선택 보류 | P0/P5 |
@@ -425,9 +425,11 @@ P1의 API는 health와 접근 거부 응답이었다. P2에서는 조건부 Goog
 
 `GET /api/v1/me`는 현재 요구되는 TERMS·PRIVACY 정책 버전, HTTPS 정책 URL, 동의 상태를 돌려준다. `POST /api/v1/me/consents`는 exact Origin·CSRF를 확인해 한 종류의 동의를 저장하거나 철회한다. 현재 버전과 입력 버전이 다르면 409이며 이전 버전 동의는 접근을 허용하지 않는다. 기본 동의 화면은 두 항목을 따로 표시하고 철회할 수 있다. P5는 위치 수집·상대 제공 동의를 별도 항목으로 추가한다. 최신 두 동의가 없으면 프로필 수정·학생 확인·관리자 검토가 거절된다. `migrations/0003_consents.sql`의 부분 unique index는 같은 사용자·항목·버전에 대한 활성 동의 중복을 막는다. 로컬 합성 로그인은 실제 약관이 아닌 로컬 데모 문구와 `local-demo-v1`을 사용한다. 실제 Google OIDC는 local에서도 TERMS·PRIVACY 정책 버전과 HTTPS URL이 설정되어야 시작할 수 있다. 원격은 학교·OAuth 설정과 함께 위치 정책 두 종류의 버전·HTTPS URL도 요구한다.
 
-학교 Google `SCHOOL_ASSERTION` 모드에서는 새 계정이 별도 수동 확인 요청 없이 자격을 얻는다. `POST /api/v1/me/verification-requests` 및 `GET/PATCH /api/v1/admin/verification-requests`는 로컬 수동 모드와 기존 대기 기록을 위한 호환 경로로 남긴다. 학생 계정 검토와 별개로 차량·운전자 승인 대기열은 유지한다. 별도 HTTP로 ADMIN을 지정하는 수단은 없다. OAuth credentials, 실제 Workspace `hd`, 캠퍼스, 정책 URL/내용이 미설정이므로 원격 Google 로그인은 계속 닫혀 있다.
+학교 Google `SCHOOL_ASSERTION` 모드에서는 새 계정이 별도 수동 확인 요청 없이 자격을 얻는다. `POST /api/v1/me/verification-requests` 및 `GET/PATCH /api/v1/admin/verification-requests`는 로컬 수동 모드와 기존 대기 기록을 위한 호환 경로로 남긴다. 학생 계정 검토와 별개로 차량·운전자 승인 대기열은 유지한다. 별도 HTTP로 ADMIN을 지정하는 수단은 없다. OAuth client/secret, 실제 Workspace `hd`, 지원 이메일과 정책 URL/내용이 미설정이므로 원격 Google 로그인은 계속 닫혀 있다.
 
-가천대학교 이메일 도메인 `gachon.ac.kr`은 확정됐지만 Google OAuth client ID·secret과 실제 Workspace `hd` claim이 없어 원격 OAuth를 수행할 수 없다. 그 대신 로컬 로그인은 고정 합성 seed 계정만 허용한다. `.dev.vars.example`의 `ALLOW_DEV_AUTH=true`는 `APP_ENV=development`, localhost, 세 개의 seed UUID, exact Origin 검사를 통과하는 로컬 Worker에만 효과가 있다. staging/production은 `STUDENT_VERIFICATION_MODE=SCHOOL_ASSERTION`, `gachon.ac.kr` 단일 이메일 도메인과 검증된 Workspace `hd`를 요구한다. 실제 OAuth credentials 발급, 등록 redirect `APP_ORIGIN/api/v1/auth/google/callback`, 단일 캠퍼스와 정책 설정은 P0 외부 설정이며 여기서 추정하지 않는다.
+Google Cloud 프로젝트 `campus-ride-gachon`을 생성했지만 Google Auth Platform 앱과 OAuth client ID·secret, 실제 Workspace `hd` claim은 아직 설정·검증되지 않아 원격 OAuth를 수행할 수 없다. 로컬 로그인은 고정 합성 seed 계정만 허용한다. `.dev.vars.example`의 `ALLOW_DEV_AUTH=true`는 `APP_ENV=development`, localhost, 세 개의 seed UUID, exact Origin 검사를 통과하는 로컬 Worker에만 효과가 있다. staging/production은 `STUDENT_VERIFICATION_MODE=SCHOOL_ASSERTION`, `gachon.ac.kr` 단일 이메일 도메인과 검증된 Workspace `hd`를 요구한다. staging OAuth client의 redirect URI는 `https://campus-ride-staging.jwjoo0512.workers.dev/api/v1/auth/google/callback`이며, 이 server-side 흐름은 JavaScript origin을 사용하지 않는다. 실제 지원 이메일 선택, OAuth client/secret 등록과 학교·정책 설정은 외부 작업이며 여기서 추정하지 않는다.
+
+Google Auth Platform은 개인 계정 소유 프로젝트이므로 audience를 `External`로 설정한다. 사용자 지원 이메일은 동의 화면에 표시되므로 실제 운영자가 정한다. 앱은 현재 `openid email profile`만 요청한다. Google 안내에 따르면 이 기본 로그인 scope만 쓰는 Testing 앱은 test-user 목록 제한과 7일 Google 승인 만료 예외가 적용되므로, Gachon 계정 제한은 Worker가 검증된 이메일 도메인과 Workspace `hd`로 강제한다. 앱 세션의 7일 만료는 별도 정책이다. [Google App Audience](https://support.google.com/cloud/answer/15549945?hl=en)
 
 설정: `GOOGLE_CLIENT_ID`는 Wrangler vars, `GOOGLE_CLIENT_SECRET`, `CSRF_HMAC_KEY`, `BOARDING_HMAC_KEY`는 로컬 `.dev.vars` 또는 원격 Wrangler Secrets, 학교 ID·campus·정확한 email/hosted-domain allowlist·학생 확인 방식·학과 source/template/aliases는 검증된 env vars로 제공한다. 로컬 boarding HMAC은 개발 전용 fallback을 쓰며 원격은 별도 32자 이상 키가 없으면 환경 검증에서 차단한다. 운영/실제 staging 설정은 학교가 확인된 뒤 적용한다. 현재 실제 값이 없어 원격 환경 검사는 닫혀 있다. OAuth 시작/콜백 오류·학교 계정 거부는 안전한 JSON 오류만 반환하고 요청 URL/query·코드·토큰·이메일을 서버 로그로 내보내지 않는다.
 
