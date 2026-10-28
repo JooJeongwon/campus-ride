@@ -175,7 +175,7 @@
 
 2026-10-28 추가: Cron 정리 작업은 예정 시각 지연·실행 시간·결과·고정된 실패 단계를 구조화 로그로 남기고, D1 실패 시 기존 행 한도 안에서 전체 패스를 한 번 재시도한다. Wrangler 관측 로그를 켜고 invocation URL 로그는 비활성화했으며 query string redaction을 적용했다. Workers/D1 통합 47개, typecheck, lint, build 통과. 실제 계정 로그 보존/비용 확인은 남아 있다.
 
-2026-10-28 추가: 연결된 Cloudflare 계정에 대해 읽기 전용 확인을 했을 때 프로젝트 리소스는 없었다. 이후 staging 인프라 생성 요청에 따라 `campus-ride-staging` D1/Worker를 만들고 D1에 16개 migration을 적용했다. D1 backend는 `production`, 실행 region은 APAC, jurisdiction은 미설정이다. staging Worker는 workers.dev에서 정적 화면을 제공하고, query redaction·invocation URL 비활성·로그 persist 설정을 Cloudflare에서 확인했다. 학교 준비/개발 인증은 false이며 확인된 API 요청은 503으로 닫혀 있다. 합성 seed나 학교 데이터는 올리지 않았다. 구독/플랜 조회는 `Billing Read` 권한 부족(403)으로 실패했고 보관/복구 절차 승인도 없어 P6의 계정 정책 체크는 미완료다.
+2026-10-28 추가: 연결된 Cloudflare 계정에 대해 읽기 전용 확인을 했을 때 프로젝트 리소스는 없었다. 이후 staging 인프라 생성 요청에 따라 `campus-ride-staging` D1/Worker를 만들고 D1에 16개 migration을 적용했다. D1 backend는 `production`, 실행 region은 APAC, jurisdiction은 미설정이다. 현재 Worker 설정 조회에서 DB 바인딩 연결, observability/logs 활성화, query redaction, invocation URL 비활성, persist를 확인했다. D1 bookmark 조회 API가 현재 bookmark를 반환해 현재 복구점 존재를 확인했지만, 생성일과 같은 날이라 보존 창 길이는 확인할 수 없다. 구독/플랜 조회는 연결된 OAuth 토큰에 `Billing Read` scope가 없어 403으로 실패했다. 학교 준비/개발 인증은 false이며 확인된 API 요청은 503으로 닫혀 있다. 합성 seed나 학교 데이터는 올리지 않았다. 플랜·비용·로그 보존과 보관/복구 절차 승인이 미확정이라 P6 계정 정책 체크와 P7 복구 시험은 미완료다.
 
 ## 9. P7 — staging 배포와 통합 검증
 

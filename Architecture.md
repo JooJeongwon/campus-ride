@@ -572,7 +572,7 @@ Workers/D1 통합 테스트는 비당사자·무CSRF 접수 거절, 신고 상�
 
 Cloudflare 공식 문서 기준 D1 Time Travel은 production 저장소 backend에서 제공되며, 복구 창은 Workers Free 7일·Paid 30일이다. 구형 `alpha` backend는 별도 snapshot backup 경로를 사용하므로 실제 DB backend는 `wrangler d1 info DB_NAME`의 `version`으로 확인해야 한다. Time Travel 복구는 DB 전체를 지정 시점으로 덮어쓴다. 따라서 탈퇴 이후 과거 시점으로 복구하면 탈퇴 전 개인정보가 다시 나타날 수 있다는 점은 공식 복구 동작에서 도출되는 운영 위험이며, 복구 뒤 서비스를 열기 전에 확인·처리 절차가 필요하다. 검토한 공식 문서는 계정별 삭제 요청에 대한 backup purge SLA를 규정하지 않는다.
 
-근거: [D1 Time Travel and backups](https://developers.cloudflare.com/d1/reference/time-travel/), [D1 limits](https://developers.cloudflare.com/d1/platform/limits/). Staging D1은 `production` backend이며 `wrangler d1 info`에서 실행 region `APAC`, jurisdiction `null`을 확인했다. 이 설정은 국내 저장을 보장하지 않는다. Cloudflare 계정 플랜은 API 권한 부족으로 확인하지 못했고 production D1은 아직 없다. 플랫폼 복구 창은 이 서비스의 보관·삭제 정책이나 법적 보존기간을 확정하지 않는다. 탈퇴 이벤트를 복구점 밖에 별도로 보존하거나 과거 복구 시 재적용하는 방식은 운영 주체가 복구·감사 요구를 확인한 뒤 설계해야 한다.
+근거: [D1 Time Travel and backups](https://developers.cloudflare.com/d1/reference/time-travel/), [D1 limits](https://developers.cloudflare.com/d1/platform/limits/). Staging D1은 `production` backend이며 `wrangler d1 info`에서 실행 region `APAC`, jurisdiction `null`을 확인했다. 이 설정은 국내 저장을 보장하지 않는다. 2026-10-28에 D1 bookmark 조회 API가 현재 bookmark를 반환하는 것을 확인했지만, DB 생성일이 같아 복구 보존 창의 길이는 알 수 없다. 계정 구독 조회는 현재 Cloudflare OAuth 연결에 `Billing Read` scope가 없어 403으로 실패했으므로 플랜·비용은 미확인이고 production D1도 없다. 플랫폼 복구 창은 이 서비스의 보관·삭제 정책이나 법적 보존기간을 확정하지 않는다. 탈퇴 이벤트를 복구점 밖에 별도로 보존하거나 과거 복구 시 재적용하는 방식은 운영 주체가 복구·감사 요구를 확인한 뒤 설계해야 한다.
 
 ## 30. P6 Worker 보안 헤더와 계정별 제한 (2026-10-28)
 
