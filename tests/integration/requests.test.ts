@@ -603,6 +603,8 @@ it('accepts, verifies boarding, starts and completes a trip with replay-safe com
     expect(locks.results).toEqual([]);
   } finally {
     await env.DB.batch([
+      env.DB.prepare('DELETE FROM location_access_records WHERE user_id IN (?,?) OR location_owner_user_id IN (?,?)')
+        .bind(driverId, riderId, driverId, riderId),
       env.DB.prepare('DELETE FROM latest_locations WHERE trip_id=?').bind(createdTripId ?? ''),
       env.DB.prepare('DELETE FROM active_user_locks WHERE user_id IN (?,?)').bind(driverId, riderId),
       env.DB.prepare('DELETE FROM ride_requests WHERE trip_id=?').bind(createdTripId ?? ''),

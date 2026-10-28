@@ -1,6 +1,6 @@
 # 교내 동승 매칭 웹앱 — Architecture
 
-문서 버전: 0.7 · 기준일: 2026-10-28 · 상태: P1~P4 구현, P5 위치 공유·가상 위치도·위치 표본 제공 내역 로컬 알림/기록 및 P6 로컬 구현, staging D1/Worker 연결; 정책 문안 4종은 검토용 초안이며 위치정보 적용·통지 요건·보관 설정이 미확정이라 staging API는 닫혀 있고 실제 지도·실기기 검증 대기
+문서 버전: 0.8 · 기준일: 2026-10-28 · 상태: P1~P4 구현, P5 위치 공유·가상 위치도, P6 탈퇴 후 차단·닉네임 정리 구현; staging은 OIDC 계정 검증 전용(사용자·세션 생성 없음)이며 다른 API는 차단, 실제 Workspace claim은 staging에서 확인; 정책 승인·위치 통지·이력 보유·복구 절차·지도·실기기 검증 대기
 
 제품 범위는 [Project.md](Project.md), 작업 순서는 [Roadmap.md](Roadmap.md), 에이전트 지침은 [AGENTS.md](AGENTS.md)를 따른다. P1의 테이블·인덱스·로컬 실행과 health API, P2의 OIDC·세션·프로필·학생 확인·정책 동의, P3의 운전자 프로필·운행/요청 수명주기와 만료 Cron, P4의 추천 검색·학과 순위·성별/그룹 조건, P5의 로컬 위치 공유 핵심 흐름과 가상 위치도, P6의 신고·차단·계정 제한·학생 자격 만료·운영 UI·동의 관리·계정 탈퇴 1차 흐름과 기본 보안 헤더를 구현했다. 지도 공급자·실제 위치 정책·모바일 실기기는 미확정/미검증이고, 데이터 보관기간·복구 정책과 추가 운영 도구는 남아 있다. 현재 구현 범위와 실행 절차는 §14~30에 기록한다. 공식 플랫폼 문서로 확인한 기능과 이 서비스의 설계 기본값을 구분한다.
 
@@ -65,7 +65,7 @@ Wrangler 구성 골격은 다음과 같다. 실제 ID·학교 설정·환경은 
 }
 ```
 
-`compatibility_date`는 실제 개발 시 지원 여부를 확인해 고정한다. 실제 dev 서버 포트도 `APP_ORIGIN`과 맞춘다. staging·production은 별도 Worker·D1·Google OAuth client·Secrets를 사용한다. staging OAuth credentials는 연결됐지만 학교·정책 설정이 미완료라 API는 계속 닫혀 있다. 준비 후에는 정상 인증된 모든 `gachon.ac.kr` 학교 계정이 쓸 수 있다.
+`compatibility_date`는 실제 개발 시 지원 여부를 확인해 고정한다. 실제 dev 서버 포트도 `APP_ORIGIN`과 맞춘다. staging·production은 별도 Worker·D1·Google OAuth client·Secrets를 사용한다. staging은 `STAGING_AUTH_TEST_ONLY=true`일 때 Google start/callback만 허용한다. callback은 OIDC와 `gachon.ac.kr` 이메일·Workspace `hd`를 검증하되 사용자·학생확인·세션을 만들지 않는다. 모든 다른 `/api/*`는 503이며 `SCHOOL_CONFIG_READY=false`, `ALLOW_DEV_AUTH=false`를 유지한다. 실제 학교 계정 claim과 정책·운영 설정을 확인하기 전에는 normal API를 열지 않는다. 준비 후에도 자격은 학적이 아니라 인증된 계정 보유 여부로 판정한다.
 
 공식 근거: [Static Assets](https://developers.cloudflare.com/workers/static-assets/), [Wrangler assets 설정](https://developers.cloudflare.com/workers/wrangler/configuration/#assets), [Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/). `scheduled()` 실행 지연이나 일시 실패가 있어도 요청 시점의 만료 검증은 계속 작동해야 한다.
 
@@ -92,9 +92,11 @@ Google 토큰 검증 근거: [OpenID Connect](https://developers.google.com/iden
 - 로그아웃·정지·자격 만료·탈퇴 시 기존 세션을 폐기한다. 자격 만료 학생의 다음 요청에는 학생 확인 재신청이 가능한 제한 세션을 발급한다. 운영자 변경은 감사 기록을 남긴다.
 - 인증·사용자별 응답은 `no-store`다. CORS는 기본 same-origin이며 임의 Origin을 허용하지 않는다.
 
-### 3.3 학생 자격과 학과 파싱
+### 3.3 계정 이용 자격과 학과 파싱
 
-운영자 결정에 따라 현재 재학생 여부를 별도로 심사하지 않고 정상 인증된 가천대학교 Google 계정을 이용 자격으로 인정한다. Worker는 Google ID token의 서명·issuer·audience·만료·nonce, `email_verified`, `gachon.ac.kr` 이메일, 설정된 Workspace `hd`를 검증한 뒤 `SCHOOL_ASSERTION` 확인 기록을 만들고 계정을 `VERIFIED`로 바꾼다. 이 정책은 해당 Workspace를 가진 교직원·졸업생도 허용한다. 자격 기간은 세션 최대 수명과 같은 7일이며 Google 재인증 시 갱신한다. 재인증 전에는 만료·정리 규칙으로 운행·요청·위치 권한을 중지한다. 학과는 이 인증과 별개이며 파싱 결과는 운영 확인 전까지 `UNVERIFIED` 또는 `UNKNOWN`이다.
+사용자 결정에 따라 현재 재학생 여부를 별도로 심사하지 않고 정상 인증된 가천대학교 Google 계정의 소유자를 이용 자격으로 인정한다. Worker는 Google ID token의 서명·issuer·audience·만료·nonce, `email_verified`, `gachon.ac.kr` 이메일, 설정된 Workspace `hd`를 검증한 뒤 `SCHOOL_ASSERTION`을 기록하고 내부 계정을 `VERIFIED`로 표시한다. 이 정책은 해당 Workspace를 가진 교직원·졸업생도 허용한다. 앱 내부의 `STUDENT`와 `VERIFIED` 표시는 기능 접근용 상태이며 재학생·학적 확인 사실이 아니다. 자격 기간은 세션 최대 수명과 같은 7일이며 Google 재인증 시 갱신한다. 실제 학교 이메일·`hd` 규칙은 staging 검증 전까지 normal auth에 반영된 것으로 간주하지 않는다.
+
+실제 학교 계정 이용 시험은 `STAGING_AUTH_TEST_ONLY=true`인 닫힌 staging에서 수행한다. 이 모드는 start/callback 외 모든 API를 503으로 막고, callback은 검증 결과만 일반 문구로 보여준 뒤 OAuth 임시 상태를 삭제한다. 토큰·이메일·`sub`를 응답이나 앱 로그에 남기지 않고 D1에 사용자·확인·세션 행을 만들지 않는다. Workspace 계정 선택과 Google 동의는 사용자가 직접 한다.
 
 학과 파서는 다음 계약을 가진다.
 
@@ -109,7 +111,7 @@ type DepartmentParseResult = {
 
 학교별 설정으로 `sourceField`, 제한된 구분자 템플릿, 별칭→정규 코드 표를 둔다. 템플릿은 `{id}`, `{*}`, `{department}` 토큰으로 지정하고 값은 `-`, `.`, `_` 중 구분자 하나로 나눈 뒤 위치마다 정확히 비교한다. 사용자에게서 받은 이메일/표시 이름을 설정된 JavaScript 정규식에 대입하지 않아 ReDoS를 막는다. 정확히 하나의 활성 학과 코드와 일치하면 후보를 만들고 여러 개/없음/잘못된 포맷이면 `UNKNOWN`이다. 실제 이메일·이름 예시는 익명화해 파서 fixture로만 사용한다. 학교가 수정 불가능하게 관리하는 필드이거나 승인된 학적 정보로 확인된 경우만 `VERIFIED`로 승격한다. 변경 가능한 Google 이름은 추출 성공만으로 검증되지 않는다.
 
-미확인 학과는 운영 확인이나 학교가 제공하는 정보로 보완한다. 사용자가 학과를 바꾸면 다시 미확인으로 돌아간다. `departmentId`가 있어도 `VERIFIED`가 아니면 같은 학과 우선 대상으로 세지 않는다.
+학교 학과 규칙을 확인하기 전에는 파서 설정을 원격 필수값으로 만들지 않고 `UNKNOWN`/`parserVersion=null`로 둔다. 이를 이유로 Google 계정 이용 자격을 거부하지 않는다. 미확인 학과는 운영 확인이나 학교가 제공하는 정보로 보완한다. 사용자가 학과를 바꾸면 다시 미확인으로 돌아간다. `departmentId`가 있어도 `VERIFIED`가 아니면 같은 학과 우선 대상으로 세지 않는다.
 
 ## 4. 도메인 모델과 D1 데이터 사전
 
@@ -120,7 +122,7 @@ type DepartmentParseResult = {
 - 외래키·CHECK·UNIQUE·부분 unique index를 migration에서 선언한다. D1에서 실제 지원·실행을 검증한다.
 - 학교/캠퍼스는 첫 버전 단일 값이어도 사용자·지점·노선에 일관되게 연결해 교차 매칭을 막는다.
 - `users.gender`와 운행/요청의 성별 스냅샷은 API 공개용 프로필과 분리한다.
-- 탈퇴는 계정 접근을 닫고 직접 식별 정보를 제거하지만 이력을 모두 CASCADE 삭제하지 않는다. 신고·운행·동의·감사 기록은 보관 근거와 기간이 정해질 때까지 남을 수 있으며, D1 백업 사본도 즉시 삭제된다고 보장하지 않는다.
+- 탈퇴는 계정 접근을 닫고 직접 식별 정보를 대체값으로 바꾸지만 이력을 모두 CASCADE 삭제하지 않는다. 신고·운행·동의·감사 기록은 보관 근거와 기간이 정해질 때까지 남을 수 있으며, D1 복구 사본도 즉시 삭제된다고 보장하지 않는다. 계정 삭제 때 차단 관계와 탈퇴 사용자의 위치 제공 내역에 남은 닉네임 스냅샷은 정리한다.
 
 ### 4.2 테이블
 
@@ -136,7 +138,9 @@ type DepartmentParseResult = {
 | `ride_requests` | id, trip_id, rider_id, desired_departure_at, gender_snapshot, gender_filter, department_id_snapshot, department_verified_snapshot, prefer_same_department, status, expires_at, accepted_at, boarded_at, boarding_code_hash, boarding_code_expires_at, boarding_attempt_count, version, last_command_id, created_at | 상태별 타임스탬프, 짧은 수명 탑승 코드 해시 |
 | `active_user_locks` | user_id, role, trip_id, request_id, created_at | user_id PK, DRIVER는 trip_id만, RIDER는 request_id만. 한 사람의 동시 활동 방지 |
 | `latest_locations` | user_id, trip_id, request_id, lat, lng, accuracy_m, captured_at, received_at, expires_at, sequence | user_id PK. 운전자 request_id=NULL. 사용자당 현재 좌표 1개만 보관 |
-| `location_disclosure_records` | id, owner_user_id, recipient_user_id, recipient_nickname, recipient_role, trip_id, request_id, sequence, purpose, provided_at | 좌표 없이, 새 위치 sequence가 상대에게 처음 응답된 시각·수신자·목적을 기록. owner 전용 조회, 동일 sequence/수신자 중복 기록 방지, 로컬 정리 기준 6개월 |
+| `location_disclosure_records` | id, owner_user_id, recipient_user_id, recipient_nickname, recipient_role, trip_id, request_id, sequence, purpose, requested_at, notice_acknowledged_at, position_delivered_at, post_notice_acknowledged_at | 좌표 없이 상대·목적을 먼저 안내하고 소유자가 사전 안내 확인 버튼을 누르기 전에는 좌표를 보내지 않는다. 실제 제공 시각과 제공 후 안내 확인 버튼을 누른 시각을 따로 기록한다. 동일 sequence/수신자 1회, 최대 6개월 보관; 위치 소유자의 동의 철회/탈퇴 때 그 사람의 제공 확인자료 삭제 |
+| `location_notice_presence` | user_id, trip_id, request_id, last_seen_at, expires_at | 제공자 화면의 최근 위치 화면 활성 상태 확인용 15초 presence |
+| `location_access_records` | id, user_id, location_owner_user_id, action, trip_id, request_id, accessed_at | 업로드/본인조회/상대조회 이벤트. 좌표 미포함, 최대 1년 보관; 위치 소유자의 동의 철회/탈퇴 때 해당 소유자 위치에 연결된 행 삭제 |
 | `sessions` | token_hash, user_id, csrf_hash, created_at, last_seen_at, expires_at, revoked_at | 원문 세션 토큰 금지. token_hash PK |
 | `oauth_states` | state_hash, nonce_hash, browser_binding_hash, safe_return_path, created_at, expires_at, consumed_at | state 1회 사용 및 브라우저 연계. PKCE 채택 시 verifier도 짧게 보호·보관 |
 | `consents` | id, user_id, kind, policy_version, granted_at, revoked_at | 약관·개인정보·위치 수집/상대 제공 등 목적별 기록. 실제 구분은 법무 검토로 확정 |
@@ -146,7 +150,7 @@ type DepartmentParseResult = {
 | `idempotency_keys` | user_id, operation, key, request_hash, command_id, result_json, http_status, created_at, expires_at | 복합 PK, command_id UNIQUE. 제한 정보 없는 mutation 결과만 저장 |
 | `rate_limit_buckets` | subject_hash, operation, window_start, count, expires_at | 복합 PK(subject_hash, operation, window_start). 플랫폼 제한 기능을 쓰지 않을 때의 원자적 카운터. IP는 단기 HMAC 값만 사용 |
 
-`location_disclosure_records`는 최신 위치와 분리된 기록이며 좌표 삭제·계정 탈퇴 뒤에도 유지된다. 법정 확인자료 요건과 운영자 적용 여부는 미확정이다. `audit_events`가 모든 법정 기록을 대신한다고 가정하지 않는다. 학교/지도/정책 같은 설정은 버전 관리 파일과 검증된 환경변수로 시작하며 비밀값은 Secrets로 분리한다.
+`location_disclosure_records`는 최신 위치와 분리된 좌표 없는 제공 사실이다. 정상 보유기간은 최대 6개월이며, 위치 소유자가 위치 동의를 철회하거나 탈퇴하면 본인 위치에 관한 제공 확인자료와 owner 연결 접근 로그를 온라인 D1에서 즉시 삭제한다. 소유자가 사전 안내 확인 버튼을 누르기 전에는 `GET /trips/:tripId/locations`가 새 sequence 좌표를 반환하지 않는다. 실제 제공 시각과 제공 후 안내 확인 버튼을 누른 시각을 별도로 보관한다. 화면 표시나 polling만으로 확인값을 자동 기록하지 않는다. 위치정보 사업자 분류/신고 여부, 동의 철회 후 7일 D1 백업 사본 처리와 실제 통지 의무 적용은 운영 형태 확인 전이다. Cloudflare 운영자 위치시스템 접근권한 변경 이력은 외부 권한대장에 5년 보관할 계획이지만 아직 준비되지 않았다. `audit_events`가 모든 법정 기록을 대신한다고 가정하지 않는다.
 
 ### 4.3 관계와 인덱스
 
@@ -171,7 +175,7 @@ erDiagram
 | `ride_requests` | UNIQUE(rider_id) WHERE status IN ('REQUESTED','ACCEPTED','BOARDED') |
 | `trips` | UNIQUE(driver_id) WHERE status IN ('OPEN','IN_PROGRESS') |
 | `latest_locations`, `sessions`, `oauth_states`, `idempotency_keys`, `rate_limit_buckets` | `expires_at` |
-| `location_disclosure_records` | `provided_at` 6 calendar months before cleanup; local provisional threshold |
+| `location_disclosure_records` | `COALESCE(position_delivered_at,requested_at,provided_at)` 6 calendar months before cleanup |
 | `user_blocks` | 기존 복합 PK에 추가로 `(blocked_id, blocker_id)` |
 | `audit_events`, `reports` | 각각 `(resource_type, resource_id, created_at)`, `(status, created_at)` |
 
@@ -281,11 +285,12 @@ trigger는 수락뿐 아니라 요청 생성의 상호 제약과 부적절한 �
 
 - 조회 시 received_at이 30초 초과면 갱신 중단, expires_at 경과면 좌표를 반환하지 않는다.
 - 출발·취소·거절·완료·중단·철회에서 관련 현재 위치를 같은 상태 변경 batch로 삭제한다.
+- 위치 수집/제공 동의 철회 때 본인의 위치 제공·통지 확인자료, 위치 소유자 접근기록과 알림 presence도 D1에서 즉시 삭제한다. 본인이 상대 위치를 조회한 보안 접근기록은 최대 1년 보관하며, `location_owner_user_id`로 철회자의 좌표가 조회된 로그를 함께 정리한다.
 - Cron은 5분마다 남은 만료 좌표·세션·OAuth state·멱등 결과와 만료 활동을 제한된 배치로 정리한다.
 - 학생 자격 만료·정지·차단은 관련 미탑승 요청을 취소한다. 운전자가 영향을 받으면 해당 OPEN 운행도 종료한다. 영향을 받는 관계에 BOARDED 승객이 있거나 운행이 IN_PROGRESS라면 운행 전체를 ABORTED로 전환하고 관련 요청·잠금을 함께 정리한다. 승객 간 차단도 같은 규칙을 적용한다. 물리적 하차를 자동 확인했다는 문구를 쓰지 않는다.
-- D1 행 삭제는 과거 백업/Time Travel 사본까지 즉시 지우는 보장이 아니다. 좌표 덮어쓰기도 백업에 흔적이 남을 수 있다. 실제 플랜의 복구 가능 기간·삭제·복원 절차를 확인해 정책에 반영한다.
-- 정책상 요구 기간을 플랫폼 기본 백업으로 만족할 수 없다면 별도 키를 이용한 좌표 필드 암호화와 키 폐기 등 대안을 검토한 뒤 출시한다. 단순 TTL만으로 영구 삭제 완료라고 쓰지 않는다.
-- 위치정보법 제19조에 따라 위치기반서비스 약관에는 운영자 연락처, 이용자 권리, 서비스 내용, 위치정보 및 이용·제공사실 확인자료의 보유 목적·기간 등을 반영해야 한다. 이용자가 지정한 제3자에게 위치를 제공할 때는 제공받는 자·제공 시각·목적을 매회 즉시 통지해야 하며, 별도 동의와 법령상 기준을 충족하는 경우에 한해 최대 30일 범위의 모아 통지가 가능하다. 위치정보 보호조치 기준 제6조는 적용 대상 사업자에게 취급대장 자동 기록과 최소 6개월 보관을 요구한다. 현재 로컬 구현은 새 위치 sequence가 상대 화면에 처음 응답될 때 좌표 없는 제공 기록을 남기고 본인 화면에서 최근 20건을 통지한다. 동일 sequence 반복 조회는 중복 기록하지 않고 통지 확인 여부도 별도로 증명하지 않으므로, 이를 매회 통지·기록 요건 충족으로 간주할 수 없다. 로컬 정리 기준은 6개월이며 운영자 적용 여부·더 긴 기간 필요성·통지 확인자료는 법률/운영 검토 후 승인해야 한다. [위치정보법 제19조](https://law.go.kr/lsLinkCommonInfo.do?chrClsCd=010202&lsJoLnkSeq=1015334231) · [위치정보 보호조치 기준 제6조](https://www.law.go.kr/LSW/admRulLsInfoP.do?admRulSeq=2100000279386)
+- D1 행 삭제는 과거 Time Travel 사본까지 즉시 지우지 않는다. staging Free의 복구 창은 7일이다. 복구는 DB 전체를 덮어쓰므로 외부 삭제/철회대조부와 [운영 복구 절차](docs/operations/data-retention-and-restore.md)를 따른다. 해당 대조부가 아직 구축되지 않아 원격 계정 API는 계속 닫는다.
+- 온라인 정리 기준은 [개인정보 처리방침](docs/policies/privacy.md)과 운영 절차에 정했다. 위치 API는 수신 후 60초부터 만료 좌표를 반환하지 않고 Cron이 5분마다 제한된 배치로 물리 삭제한다. 배치 한도/실패에 따라 물리 삭제는 늦을 수 있으며 백업 기간은 별도다.
+- 위치정보법 제19조와 위치정보 보호조치 기준 적용 대상 여부는 실제 운영 형태 확인이 남아 있다. 구현은 새 위치 sequence 요청 때 좌표 없는 사전 알림 기록을 만들고, 소유자가 인앱 안내의 확인 버튼을 누르기 전에는 좌표를 반환하지 않는다. 실제 좌표가 반환되면 제공 시각을 저장하고, 제공 후 이용자 화면에 수신자·시각·목적을 다시 표시해 별도 확인 버튼을 눌렀을 때 확인값을 기록한다. 화면 표시나 polling만으로 확인값을 자동 기록하지 않는다. 같은 sequence 반복 요청에는 다시 응답하지 않는다. 제공 사실은 최대 6개월, 위치 API 접근기록은 최대 1년 보관한다. 위치 동의 철회 후 확인자료 파기와 7일 D1 복구 사본의 법적 관계는 미확정이므로 정책 시행과 위치 공유를 보류한다. 접근권한 부여/변경/말소 이력 5년 보관용 Cloudflare 외부대장도 미구축이다. [위치정보법 제19조](https://www.law.go.kr/LSW/lsLinkCommonInfo.do?lsJoLnkSeq=1032065431) · [위치정보법 제24조](https://law.go.kr/lsLinkCommonInfo.do?chrClsCd=010202&lsJoLnkSeq=1029559327) · [위치정보 보호조치 기준](https://www.law.go.kr/admRulLsInfoP.do?admRulSeq=2100000279386)
 
 ## 9. API 계약
 
@@ -321,8 +326,9 @@ trigger는 수락뿐 아니라 요청 생성의 상호 제약과 부적절한 �
 | POST `/trips/:tripId/cancel` | expectedVersion, reasonCode | OPEN 운행 운전자 취소, 요청 취소와 잠금 해제 |
 | POST `/trips/:tripId/abort` | expectedVersion, reasonCode | 운전자/운영자 중단 |
 | PUT `/locations/me` | tripId, requestId?, lat, lng, accuracyM, capturedAt, sequence | 현재 공유가 허용된 본인만 |
-| GET `/locations/me` | 없음 | 본인 최신 위치와 현재 활동의 최근 위치 제공 내역 20건, `no-store` |
-| GET `/trips/:tripId/locations` | 없음 | 서버가 필터한 허용 상대의 최신 위치; 새 sequence의 최초 응답은 좌표 없는 제공 기록으로 남김 |
+| GET `/locations/me` | 없음 | 본인 최신 위치 및 관계 종료/철회 뒤에도 최근 위치 제공 내역 20건, `no-store` |
+| POST `/locations/me/disclosures/ack` | disclosureIds (1~20) | 본인 소유의 제공 전·후 위치 안내를 이용자가 확인 버튼으로 확인, CSRF |
+| GET `/trips/:tripId/locations` | 없음 | 서버가 필터한 상대 위치. 새 sequence는 소유자 사전알림 확인 후 1회만 좌표 반환 |
 | GET `/me/active-peers` | 없음 | 수락/탑승된 현재 관계에서 본인에게 허용된 동승 상대만 |
 | GET `/blocks` | 없음 | 본인이 차단한 사용자 목록, `no-store` |
 | POST `/blocks` | blockedUserId | 실제 동승 이력이 있는 상대를 차단, 관련 활동 처리·감사 기록 |
@@ -388,8 +394,8 @@ trigger는 수락뿐 아니라 요청 생성의 상호 제약과 부적절한 �
 
 | 결정 | 현재 기본값 | 확정 시점 |
 | --- | --- | --- |
-| 학교·계정 범위 | 가천대학교 글로벌캠퍼스(성남) 단일 서비스, `gachon.ac.kr` 메일, 학교 선택 UI 없음. 실제 Workspace `hd`는 staging 검증 대기 | P0/P2 |
-| 서비스 계정 자격 | 정상 인증된 가천대학교 Google 계정이면 현재 재학생 여부와 관계없이 이용 자격을 부여한다. Google 재인증 주기는 세션 만료에 맞춰 7일 | P0 사용자 결정; staging OIDC 검증 대기 |
+| 학교·계정 범위 | 가천대학교 글로벌캠퍼스(성남) 단일 서비스, `gachon.ac.kr` 메일, 학교 선택 UI 없음. 실제 Workspace `hd`는 staging OIDC callback에서 확인 | P0/P2 |
+| 서비스 계정 자격 | 정상 인증된 가천대학교 Google 계정이면 현재 재학생 여부와 관계없이 이용 자격을 부여한다. Google 재인증 주기는 세션 만료에 맞춰 7일 | P0 사용자 결정 및 staging OIDC claim 검증 완료 |
 | 운전자 확인 수단 | 학생 계정 자격과 별도로 차량·운전자 프로필은 운영자 승인 전 `PENDING` | P0/P3, 파일럿 전 필수 |
 | 지도 공급자 | Kakao 우선 후보(무료 쿼터를 받을 첫 활성 앱일 때); NAVER primary 계정 여부와 대안 비교 대기. SDK 미연결 | P0/P5 |
 | 같은 학과 우선 | 검증된 학과의 추천 순위 | P0 |
@@ -424,19 +430,19 @@ P1의 API는 health와 접근 거부 응답이었다. P2에서는 조건부 Goog
 
 `GET /api/v1/auth/google/start`는 state·nonce·브라우저 바인딩 쿠키·PKCE S256 verifier를 준비한다. 브라우저 비밀과 state는 D1의 SHA-256 값으로 연결하고 verifier는 10분짜리 OAuth 상태 행에 보관한다. `GET /callback`은 state/쿠키/만료를 한 개 조건부 UPDATE에서 검사·소비해 재사용을 막고, 라이브러리로 token exchange와 OIDC claim 검증을 수행한 뒤 `validateApplicationLevelSignature()`로 discovery JWKS 서명을 별도 확인한다. `sub`를 사용자 고유키로 쓴다. `email_verified`, 정확히 허용된 이메일 도메인, 허용 `hd`, issuer·signature·audience·expiry·nonce를 모두 확인한다. 이메일이 바뀌어도 서로 다른 `sub` 사용자를 병합하지 않는다. Google refresh token을 요청하거나 보관하지 않는다.
 
-새 계정은 `STUDENT/ACTIVE/PENDING/UNDISCLOSED`로 만들고, 검증된 가천대학교 Google 계정이면 같은 D1 batch에서 `SCHOOL_ASSERTION` 기록을 추가해 `VERIFIED`로 바꾼다. 확인 기간 7일은 세션 최대 수명과 같다. 재인증마다 새 확인 기록으로 갱신하며 대기 중이던 수동 요청은 `EXPIRED` 처리한다. Google 이름은 닉네임 후보에만 사용하고 사용자가 성별을 입력하기 전에는 `UNDISCLOSED`다. 학과는 설정된 local-part 또는 Google name에서 제한된 템플릿으로만 후보를 파싱하고 운영 확인 전에는 `UNVERIFIED`다. 학교 설정에서 잘못되거나 모호한 값은 `UNKNOWN`이다. 허용 이메일 도메인은 `gachon.ac.kr`이며 실제 Workspace `hd`, 캠퍼스, 학과 파서 설정은 검증 전까지 원격 환경에 두지 않는다.
+새 계정은 `STUDENT/ACTIVE/PENDING/UNDISCLOSED`로 만들고, 검증된 가천대학교 Google 계정이면 같은 D1 batch에서 `SCHOOL_ASSERTION` 기록을 추가해 `VERIFIED`로 바꾼다. 확인 기간 7일은 세션 최대 수명과 같다. 재인증마다 새 확인 기록으로 갱신하며 대기 중이던 수동 요청은 `EXPIRED` 처리한다. Google 이름은 닉네임 후보에만 사용하고 사용자가 성별을 입력하기 전에는 `UNDISCLOSED`다. 학과는 설정된 local-part 또는 Google name에서 제한된 템플릿으로만 후보를 파싱하고 운영 확인 전에는 `UNVERIFIED`다. 학교 설정에서 잘못되거나 모호한 값은 `UNKNOWN`이다. 허용 이메일 도메인과 실제 Workspace `hd=gachon.ac.kr`는 staging OIDC callback에서 확인했다. 캠퍼스 운영 설정과 학과 파서는 아직 확정되지 않았다.
 
 세션 쿠키에는 256비트 무작위 opaque 토큰만 담고 SHA-256 해시만 D1에 저장한다. 운영 쿠키는 `__Host-campus_session`과 `__Host-campus_oauth`, HTTPS `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`를 쓴다. localhost에서는 `campus_session` / `campus_oauth`를 사용한다. 세션 최대 수명은 7일, 유휴 만료는 24시간이고 사용자는 본인/ADMIN 조회·mutation마다 다시 읽어 정지 상태를 확인한다. 모든 응답은 `no-store`다. PATCH·검증 요청·로그아웃·관리자 판단은 exact Origin 및 세션 토큰에서 파생한 HMAC CSRF 토큰을 검증한다. 로컬 전용으로만 고정된 개발 HMAC fallback이 있고 원격 환경은 길이 확인된 `CSRF_HMAC_KEY` 없이는 503이다.
 
 `GET /api/v1/me`는 현재 요구되는 TERMS·PRIVACY 정책 버전, HTTPS 정책 URL, 동의 상태를 돌려준다. `POST /api/v1/me/consents`는 exact Origin·CSRF를 확인해 한 종류의 동의를 저장하거나 철회한다. 현재 버전과 입력 버전이 다르면 409이며 이전 버전 동의는 접근을 허용하지 않는다. 기본 동의 화면은 두 항목을 따로 표시하고 철회할 수 있다. P5는 위치 수집·상대 제공 동의를 별도 항목으로 추가한다. 최신 두 동의가 없으면 프로필 수정·학생 확인·관리자 검토가 거절된다. `migrations/0003_consents.sql`의 부분 unique index는 같은 사용자·항목·버전에 대한 활성 동의 중복을 막는다. 로컬 합성 로그인은 실제 약관이 아닌 로컬 데모 문구와 `local-demo-v1`을 사용한다. 실제 Google OIDC는 local에서도 TERMS·PRIVACY 정책 버전과 HTTPS URL이 설정되어야 시작할 수 있다. 원격은 학교·OAuth 설정과 함께 위치 정책 두 종류의 버전·HTTPS URL도 요구한다.
 
-학교 Google `SCHOOL_ASSERTION` 모드에서는 새 계정이 별도 수동 확인 요청 없이 자격을 얻는다. `POST /api/v1/me/verification-requests` 및 `GET/PATCH /api/v1/admin/verification-requests`는 로컬 수동 모드와 기존 대기 기록을 위한 호환 경로로 남긴다. 학생 계정 검토와 별개로 차량·운전자 승인 대기열은 유지한다. 별도 HTTP로 ADMIN을 지정하는 수단은 없다. Google OAuth client와 Worker secret binding은 staging에 연결했지만 실제 Workspace `hd`와 정책 URL/내용이 미설정이라 원격 로그인은 닫혀 있다.
+학교 Google `SCHOOL_ASSERTION` 모드에서는 새 계정이 별도 수동 확인 요청 없이 자격을 얻는다. `POST /api/v1/me/verification-requests` 및 `GET/PATCH /api/v1/admin/verification-requests`는 로컬 수동 모드와 기존 대기 기록을 위한 호환 경로로 남긴다. 학생 계정 검토와 별개로 차량·운전자 승인 대기열은 유지한다. 별도 HTTP로 ADMIN을 지정하는 수단은 없다. Google OAuth client와 Worker secret binding을 staging에 연결했고 실제 Workspace `hd` 일치를 확인했다. auth-test-only 모드는 성공 callback에서도 계정·세션을 만들지 않으며 일반 API를 차단한다. 실제 정책 URL/내용과 운영 정보가 미확정이라 일반 staging 로그인은 아직 닫혀 있다.
 
-Google Cloud 프로젝트 `campus-ride-gachon`과 staging OAuth Web client는 생성됐다. Client ID는 `wrangler.jsonc`의 staging vars에, Client Secret은 `GOOGLE_CLIENT_SECRET` 이름의 Cloudflare secret binding에 저장해 staging에 배포했다. 실제 Workspace `hd` claim은 미검증이고 `SCHOOL_CONFIG_READY=false`라 원격 OAuth는 계속 닫혀 있다. 로컬 로그인은 고정 합성 seed 계정만 허용한다. `.dev.vars.example`의 `ALLOW_DEV_AUTH=true`는 `APP_ENV=development`, localhost, 세 개의 seed UUID, exact Origin 검사를 통과하는 로컬 Worker에만 효과가 있다. staging/production은 `STUDENT_VERIFICATION_MODE=SCHOOL_ASSERTION`, `gachon.ac.kr` 단일 이메일 도메인과 검증된 Workspace `hd`를 요구한다. staging OAuth client의 redirect URI는 `https://campus-ride-staging.jwjoo0512.workers.dev/api/v1/auth/google/callback`이며, 이 server-side 흐름은 JavaScript origin을 사용하지 않는다. 학교·정책 설정은 여전히 미완료다.
+Google Cloud 프로젝트 `campus-ride-gachon`과 staging OAuth Web client는 생성됐다. Client ID는 `wrangler.jsonc`의 staging vars에, Client Secret은 `GOOGLE_CLIENT_SECRET` 이름의 Cloudflare secret binding에 저장해 staging에 배포했다. 실제 Workspace `hd` claim 일치는 staging auth-only callback에서 확인했다. `SCHOOL_CONFIG_READY=false`와 `STAGING_AUTH_TEST_ONLY=true`라 일반 OAuth 가입과 API는 계속 닫혀 있다. 로컬 로그인은 고정 합성 seed 계정만 허용한다. `.dev.vars.example`의 `ALLOW_DEV_AUTH=true`는 `APP_ENV=development`, localhost, 세 개의 seed UUID, exact Origin 검사를 통과하는 로컬 Worker에만 효과가 있다. staging/production은 `STUDENT_VERIFICATION_MODE=SCHOOL_ASSERTION`, `gachon.ac.kr` 단일 이메일 도메인과 검증된 Workspace `hd`를 요구한다. staging OAuth client의 redirect URI는 `https://campus-ride-staging.jwjoo0512.workers.dev/api/v1/auth/google/callback`이며, 이 server-side 흐름은 JavaScript origin을 사용하지 않는다. 학교·정책 설정은 여전히 미완료다.
 
 Google Auth Platform은 개인 계정 소유 프로젝트이므로 audience를 `External`로 설정한다. 사용자 지원 이메일은 동의 화면에 표시되므로 실제 운영자가 정한다. 앱은 현재 `openid email profile`만 요청한다. Google 안내에 따르면 이 기본 로그인 scope만 쓰는 Testing 앱은 test-user 목록 제한과 7일 Google 승인 만료 예외가 적용되므로, Gachon 계정 제한은 Worker가 검증된 이메일 도메인과 Workspace `hd`로 강제한다. 앱 세션의 7일 만료는 별도 정책이다. [Google App Audience](https://support.google.com/cloud/answer/15549945?hl=en)
 
-설정: `GOOGLE_CLIENT_ID`는 Wrangler vars, `GOOGLE_CLIENT_SECRET`, `CSRF_HMAC_KEY`, `BOARDING_HMAC_KEY`는 로컬 `.dev.vars` 또는 원격 Wrangler Secrets, 학교 ID·campus·정확한 email/hosted-domain allowlist·학생 확인 방식·학과 source/template/aliases는 검증된 env vars로 제공한다. 로컬 boarding HMAC은 개발 전용 fallback을 쓰며 원격은 별도 32자 이상 키가 없으면 환경 검증에서 차단한다. 운영/실제 staging 설정은 학교가 확인된 뒤 적용한다. 현재 실제 값이 없어 원격 환경 검사는 닫혀 있다. OAuth 시작/콜백 오류·학교 계정 거부는 안전한 JSON 오류만 반환하고 요청 URL/query·코드·토큰·이메일을 서버 로그로 내보내지 않는다.
+설정: `GOOGLE_CLIENT_ID`는 Wrangler vars, `GOOGLE_CLIENT_SECRET`, `CSRF_HMAC_KEY`, `BOARDING_HMAC_KEY`는 로컬 `.dev.vars` 또는 원격 Wrangler Secrets, 학교 ID·campus·정확한 email/hosted-domain allowlist·학생 확인 방식·학과 source/template/aliases는 검증된 env vars로 제공한다. 로컬 boarding HMAC은 개발 전용 fallback을 쓰며 원격은 별도 32자 이상 키가 없으면 환경 검증에서 차단한다. 학교 도메인과 실제 Workspace `hd`는 확인됐다. 운영/일반 staging 설정은 정책·문의처·보관·복구 결정을 마친 뒤 적용한다. 현재 원격 환경 검사는 닫혀 있다. OAuth 시작/콜백 오류·학교 계정 거부는 안전한 JSON 오류만 반환하고 요청 URL/query·코드·토큰·이메일을 서버 로그로 내보내지 않는다.
 
 seed는 `.invalid` 주소를 가진 가상 사용자 3명, 학과 2개, 지점 2개, 노선·운전자·운행·운전자 잠금 각 1개를 넣는다. 반복 실행은 기존 행을 덮어쓰지 않는다. 운행 시간은 최초 seed 시점의 10분 후이며, 오래된 합성 운행은 개발 서버를 중지하고 `npm run db:reset:local`로 새로 만든다. 이 명령은 **`.wrangler/state/v3/d1`의 로컬 DB 전체를 지우고** migration과 seed를 적용한다. `--remote` 등 추가 인자를 받지 않는다. 실제 계정 자료를 로컬 seed에 섞지 않는다.
 
@@ -512,7 +518,7 @@ Workers/D1 검증은 수락과 완료의 동일 키 재시도, 다른 본문 제
 
 `src/shared/location.ts`는 UUID 관계, 위경도 범위, 유한 양수 정확도, 캡처 시각, 안전한 양수 sequence만 허용한다. `PUT /api/v1/locations/me`는 본인 세션·학생 자격·네 필수 정책 동의·현재 OPEN 운행·ACCEPTED/BOARDED 관계를 확인하고, 조건 확인과 UPSERT를 한 SQL statement에서 처리한다. 서버는 60초보다 오래되거나 30초 초과 미래의 위치, 10초보다 잦은 업로드, sequence 역행을 거절하며 계정별 제한도 적용한다. 네트워크 재시도 결과는 위치 멱등 저장소에 보관하지 않는다.
 
-`GET /api/v1/locations/me`와 `GET /api/v1/trips/:tripId/locations`는 자격·양쪽의 현재 위치 동의·활동 잠금·관계·운행 상태·차단·TTL을 다시 확인하고 `Cache-Control: no-store`를 반환한다. 운전자는 수락된 자기 승객의 위치만 보고, 승객은 자기 운전자의 위치만 본다. 승객 상호 조회는 결과에 포함되지 않는다. 상대 위치 응답은 해당 owner·recipient·trip·sequence 조합을 D1에 한 번만 기록하고, 위치 소유자 화면은 현재 활동의 최근 20건을 인앱으로 알린다. 이는 새 위치 표본 단위의 로컬 통지이며 동일 sequence 재조회와 통지 확인을 기록하지 않으므로 법적 매회 통지 체계로 확정된 것이 아니다. 동의 철회와 수락된 요청의 취소는 관련 최신 좌표를 지운다. 제공 기록은 좌표를 포함하지 않으며 현재 로컬 정리 기준 6개월 뒤 삭제한다.
+`GET /api/v1/locations/me`와 `GET /api/v1/trips/:tripId/locations`는 자격·양쪽의 현재 위치 동의·활동 잠금·관계·운행 상태·차단·TTL을 다시 확인하고 `Cache-Control: no-store`를 반환한다. 운전자는 수락된 자기 승객의 위치만 보고, 승객은 자기 운전자의 위치만 본다. 승객 상호 조회는 결과에 포함되지 않는다. 새 위치 요청은 좌표 없는 소유자 사전 안내 확인 버튼을 요구하고, 실제 제공 시각은 서버가 기록한다. 소유자는 화면에 표시된 제공 후 안내를 별도 버튼으로 확인하며, 확인 시각을 D1에 기록한다. 두 확인은 앱이 자동으로 기록하지 않는다. 앱 푸시는 제공하지 않는다. 동의 철회와 수락된 요청의 취소는 관련 최신 좌표를 지운다. 위치 동의 철회 때 본인 위치 제공 사실과 owner 연결 접근기록도 삭제한다. 제공 기록은 좌표를 포함하지 않으며 최대 6개월 뒤 정리한다. 위치정보법 적용 여부와 즉시 통지/백업 삭제 적합성은 미확정이므로 이를 법적 요건 충족으로 단정하지 않고 원격 API를 닫아 둔다.
 
 웹 화면은 위치 수집, 상대 제공, 브라우저 권한을 분리한다. 사용자가 화면을 열고 명시적으로 시작해야 `watchPosition()`을 호출한다. 숨김 탭에서 수집과 조회를 멈추며 다시 보일 때 위치 수집은 자동으로 재개하지 않고 사용자 동작을 요구한다. 상대 위치 조회는 보이는 탭에서 5초 주기로 시작하고 오류 시 최대 30초 backoff를 사용한다. 로그아웃은 위치 watcher와 로컬 좌표를 지우며, 세션 revision이 지난 프로필·동의·위치 polling 응답은 화면 상태를 갱신하지 않는다. 신선도·정확도·거절·시간 초과·통신 오류를 표시하고 지정 승차 지점과 탑승 코드 대안을 제공한다. `src/web/location-map.ts`는 승차 지점 기준의 상대 좌표와 정확도 범위를 SVG 가상 위치도로 그린다. 30초 넘게 된 위치는 점으로 표시하지 않으며, 이 그림은 실제 도로·경로·거리 안내가 아니다. 실제 지도 SDK와 공급자는 미정이다.
 
@@ -574,19 +580,19 @@ Workers/D1 통합 테스트는 비당사자·무CSRF 접수 거절, 신고 상�
 
 `migrations/0015_admin_catalog.sql`은 변경을 `STOP_CREATED/UPDATED`, `ROUTE_CREATED/UPDATED` 감사 이벤트로만 적용하고, 직접 지점/노선 변경·삭제를 막는다. 학교·캠퍼스 범위는 현재 운영자 DB 관계에서 가져오며 요청자가 값을 지정하지 않는다. 노선은 올바른 종류와 활성 상태의 지점을 요구하고 동일 교문/목적지 중복을 거절한다. 연결된 운행이 `OPEN` 또는 `IN_PROGRESS`인 동안 지점 좌표/종류/활성 상태 및 노선 활성 상태 변경을 막는다. 로컬 전용 합성 seed에만 가상 운영자 로그인을 추가해 화면을 시험할 수 있다. 실제 학교 지점·좌표·노선 값은 제공되지 않아 생성하지 않는다.
 
-## 28. P6 동의 관리와 계정 탈퇴 1차 (2026-10-28)
+## 28. P6 동의 관리와 계정 탈퇴 (2026-10-28)
 
-온보딩의 동의 화면은 TERMS·PRIVACY뿐 아니라 위치 수집·동승 상대 제공도 항상 표시한다. 위치 동의는 각각 선택·철회할 수 있으며 철회 API는 기존처럼 관련 좌표를 제거하고 이후 위치 접근을 막는다. 실제 HTTPS 정책 URL·버전이 없을 때는 로컬 데모 안내를 실제 법적 고지로 표시하지 않는다.
+온보딩의 동의 화면은 TERMS·PRIVACY뿐 아니라 위치 수집·동승 상대 제공도 항상 표시한다. 위치 동의는 각각 선택·철회할 수 있다. 철회 때 관련 최신 좌표와 해당 이용자 위치의 제공 확인자료·위치 소유자 접근기록·presence를 제거하고 이후 위치 접근을 막는다. 상대 위치를 조회한 보안 기록은 좌표 없이 위치 소유자별로 연결해 최대 1년 보관한다. 실제 HTTPS 정책 URL·버전이 없을 때는 로컬 데모 안내를 실제 법적 고지로 표시하지 않는다.
 
-`DELETE /api/v1/me`는 exact Origin·CSRF와 로그인 시각 5분 이내를 요구한다. `migrations/0016_account_deletion.sql`은 `USER_DELETED` 이벤트 한 번으로 요청·운행을 종료하고, 세션·최신 좌표·학생 확인 참조 자료·사용자 멱등 기록을 지운다. 사용자의 이메일·Google sub·닉네임·성별·학과를 제거/초기화하고 차량 식별 정보도 덮어쓴다. 기존 동의 기록은 철회 처리한다. 과거 운행·신고·감사 및 연결 UUID는 보관 근거가 정해질 때까지 남으며, 과거 기록이 완전 익명화됐다고 주장하지 않는다. D1의 과거 복구 시점 데이터 삭제는 보장하지 않는다.
+`DELETE /api/v1/me`는 exact Origin·CSRF와 로그인 시각 5분 이내를 요구한다. `migrations/0016_account_deletion.sql`은 `USER_DELETED` 이벤트 한 번으로 요청·운행을 종료하고, 세션·최신 좌표·학생 확인 자료·사용자 멱등 기록을 지운다. 이메일·Google sub는 대체값으로 바꾸고 닉네임·성별·학과를 초기화하며 차량 식별 정보도 덮어쓴다. 기존 동의는 철회한다. `0019_delete_related_identity.sql`은 관련 차단 관계를 제거하고 위치 제공 기록에 탈퇴 사용자가 수신자로 남은 닉네임을 `탈퇴한 사용자`로 바꾼다. 새 migration `0020`은 탈퇴·위치 동의 철회 때 본인 위치의 제공 확인자료와 위치 소유자 접근기록도 삭제한다. 180일 운행/요청, 종결 후 1년 신고/감사, 철회 후 1년 동의, 위치 제공사실 최대 6개월, 위치 API 접근기록 최대 1년, 탈퇴 표식 최소 1년의 정리를 `cleanupExpiredData`에 연결했다. 연결된 신고/활동이 남으면 필요한 행은 그 기록이 정리될 때까지 유지한다. 구체적인 일정은 [privacy policy](docs/policies/privacy.md) 및 [운영 복구 절차](docs/operations/data-retention-and-restore.md)를 따른다.
 
-계정 탈퇴 테스트는 최근 로그인 제한, CSRF, 감사 이벤트, 세션·좌표 회수, 진행 중 운행 취소와 직접 식별 정보 제거를 Workers/D1에서 확인한다. 개인정보/위치/운행/신고/감사의 보관기간과 실제 D1 복구·삭제 한계는 미정이며, 본 단계는 법적 보관 정책이나 원격 출시 승인을 뜻하지 않는다.
+계정 탈퇴 테스트는 최근 로그인 제한, CSRF, 감사 이벤트, 세션·좌표·차단 관계 회수, 위치 제공 닉네임 가명화, 진행 중 운행 취소와 직접 식별정보 대체를 Workers/D1에서 확인한다. 보유기간 및 로컬 정리 동작은 확정했지만 Cloudflare 외부 삭제/철회 대조부, 권한 접근대장, 실제 주소/문의처, 위치정보 법 적용 판단과 staging 복원 훈련은 미완료라 정책은 시행 전이며 원격 일반 API를 열지 않는다.
 
 ## 29. Cloudflare D1 복구 창과 탈퇴 데이터 (2026-10-28)
 
-Cloudflare 공식 문서 기준 D1 Time Travel은 production 저장소 backend에서 제공되며, 복구 창은 Workers Free 7일·Paid 30일이다. 구형 `alpha` backend는 별도 snapshot backup 경로를 사용하므로 실제 DB backend는 `wrangler d1 info DB_NAME`의 `version`으로 확인해야 한다. Time Travel 복구는 DB 전체를 지정 시점으로 덮어쓴다. 따라서 탈퇴 이후 과거 시점으로 복구하면 탈퇴 전 개인정보가 다시 나타날 수 있다는 점은 공식 복구 동작에서 도출되는 운영 위험이며, 복구 뒤 서비스를 열기 전에 확인·처리 절차가 필요하다. 검토한 공식 문서는 계정별 삭제 요청에 대한 backup purge SLA를 규정하지 않는다.
+Cloudflare 공식 문서 기준 D1 Time Travel은 production storage backend에서 제공되며, staging에서 확인한 Workers Free 복구 창은 최대 7일이다. Time Travel 복구는 DB 전체를 과거 시점으로 덮어쓸 수 있어 탈퇴·위치 동의 철회·좌표 삭제가 되살아날 수 있다. 정한 대응은 D1 외부 최소 삭제/철회 대조부를 8일 보관하고 복구 뒤 `USER_DELETED` trigger, 본인 위치 확인자료 삭제, 동의 철회를 재적용하는 것이다. 다만 위치정보법 적용 시 철회 뒤 D1 백업에 남는 자료가 허용되는지 확인되지 않았다. 현재 외부 대조부는 구축되지 않았고, 데이터 복구·재적용 훈련도 하지 않았다. 따라서 restore는 아직 실행하지 않으며, 대조부·법적 검토·훈련을 끝내기 전까지 `SCHOOL_CONFIG_READY=false`로 API를 닫아둔다. 복구 중 세션/OAuth 상태/최신 위치/presence도 모두 삭제하고 이용자 재로그인을 요구한다.
 
-근거: [D1 Time Travel and backups](https://developers.cloudflare.com/d1/reference/time-travel/), [D1 limits](https://developers.cloudflare.com/d1/platform/limits/). 운영자 확인에 따르면 Workers 플랜은 Free이며 도메인 등록은 별도 결제다. Cloudflare 공식 문서 기준 Free의 D1 Time Travel 복구 창은 7일이고 Paid는 30일이다. Staging D1은 `production` backend이며 `wrangler d1 info`에서 실행 region `APAC`, jurisdiction `null`을 확인했다. 이 설정은 국내 저장을 보장하지 않는다. 2026-10-28에 D1 bookmark 조회 API가 현재 bookmark를 반환하는 것을 확인했다. 계정 구독 API는 연결된 OAuth에 `Billing Read` scope가 없어 독립 확인할 수 없지만 운영자 제공 정보를 플랜 기준으로 사용한다. production D1은 아직 없다. 플랫폼 복구 창은 이 서비스의 보관·삭제 정책이나 법적 보존기간을 확정하지 않는다. Time Travel 복구는 DB 전체를 덮어쓰므로 탈퇴 전 정보가 되살아날 수 있다. 복구 뒤 서비스 재개 전 확인·처리 절차는 운영 주체가 승인해야 한다.
+근거: [D1 Time Travel and backups](https://developers.cloudflare.com/d1/reference/time-travel/), [D1 limits](https://developers.cloudflare.com/d1/platform/limits/). staging D1은 `production` backend이며 실행 region은 `APAC`, jurisdiction은 미설정이다. 이는 한국 내 저장을 보장하지 않는다. 플랫폼 복구 창은 서비스의 항목별 보유기간이 아니다. 외부 삭제/철회 대조부와 5년 권한대장은 실제로 준비되지 않았고 staging 복원·재적용 검증 전이므로 복구·일반 API를 개방하지 않는다. Production D1은 아직 없다.
 
 ## 30. P6 Worker 보안 헤더와 계정별 제한 (2026-10-28)
 

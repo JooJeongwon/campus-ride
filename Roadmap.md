@@ -1,6 +1,6 @@
 # 교내 동승 매칭 웹앱 — Roadmap
 
-작성일: 2026-10-28 · 상태: **가천대학교 글로벌캠퍼스 단일 운영 범위와 `gachon.ac.kr` 메일 규칙 확정(학교 선택 UI 없음); 학교 계정 OIDC 인증자를 별도 재학생 심사 없이 허용하도록 로컬 구현; P0의 Workspace·학과·운영 규칙, P1~P4 로컬 구현, P5 위치 공유·가상 위치도 구현 및 공급자 문서 비교, P6 로컬 구현·staging 연결; 서비스 보관·복구 승인·실기기·학교 정책 검증 대기**
+작성일: 2026-10-28 · 상태: **가천대학교 글로벌캠퍼스 단일 운영 범위와 `gachon.ac.kr` 기준 확정; staging OIDC claim 확인 완료(일반 API 차단); 위치 제공 전·후 확인, 위치 동의 철회 시 본인 위치 확인자료 온라인 삭제, 보유기간과 탈퇴·D1 복구 절차를 문서/로컬 구현. 공개 문의처·위치정보법/백업 처리 판단·외부 운영대장·복구 훈련·실기기 검증 대기**
 
 이 문서는 [Project.md](Project.md)의 요구사항을 [Architecture.md](Architecture.md)의 구조로 구현하기 위한 순서다. [AGENTS.md](AGENTS.md)의 검증·보안·작업 규칙을 적용한다. 일정과 담당자는 팀 구성 후 정하며 아래 체크박스는 실제 완료 전까지 체크하지 않는다.
 
@@ -24,7 +24,7 @@
 
 - [x] 대상은 가천대학교 하나, 허용 이메일 도메인은 `gachon.ac.kr`로 확정한다. 학교 선택 UI는 두지 않는다.
 - [x] 첫 서비스 캠퍼스는 가천대학교 글로벌캠퍼스(성남)로 정한다. 학교 선택 UI는 두지 않는다.
-- [ ] 실제 Google ID token의 Workspace `hd` claim을 staging 로그인으로 확인한다.
+- [x] 실제 Google ID token의 Workspace `hd`와 이메일 도메인이 모두 `gachon.ac.kr`임을 staging auth-only callback에서 확인했다. callback은 계정·세션을 만들지 않는다.
 - [ ] 이메일 local-part/Google 표시 이름/학교 디렉터리 중 학과 정보가 실제 존재하는 필드를 확인한다.
 - [ ] 개인정보 없는 학과 문자열 예시, 예외 포맷, 학과 코드·별칭 표를 확보한다.
 - [x] 사용자 결정: 정상 인증된 가천대학교 Google 계정이면 현재 재학 여부와 관계없이 이용을 허용한다. 실제 이메일 도메인과 Workspace `hd`는 OIDC에서 검증하고 7일 뒤 Google 재인증한다.
@@ -37,7 +37,7 @@
 
 **완료 기준:** Project의 학교별 확인 표에 실제 근거 또는 명시적 미확정 상태가 있고, 확정 정보와 가정이 구분된다. 학교가 특정되지 않아도 합성 학교 설정과 파서 fixture는 준비한다. 실제 서비스가 합법/출시 가능하다고 이 단계에서 추정 선언하지 않는다.
 
-2026-10-28: 운영자가 가천대학교 한 곳만 대상으로 하고 학교 선택 UI를 만들지 않으며, 허용 이메일 도메인을 `gachon.ac.kr`로 정했다. 이후 사용자 지시에 따라 정상 인증된 해당 학교 Google 계정 소유자는 현재 재학 여부와 무관하게 가입·이용을 허용한다. 구현은 `SCHOOL_ASSERTION` 기록으로 자격을 즉시 부여하고 세션 최대 수명인 7일 뒤 Google 재인증으로 갱신한다. 사용자 결정으로 서비스 캠퍼스는 글로벌캠퍼스로 확정했다. Workspace `hd`, 학과 포맷·별칭, 승하차 지점, 운영·법적 정책은 확인이 필요하다.
+2026-10-28: 운영자가 가천대학교 한 곳만 대상으로 하고 학교 선택 UI를 만들지 않으며, 허용 이메일 도메인을 `gachon.ac.kr`로 정했다. 이후 사용자 지시에 따라 인증된 해당 Workspace 계정 소유자는 현재 재학 여부와 관계없이 이용 자격을 갖는다. 이는 재학생 여부를 확인한다는 뜻이 아니다. 정상 로그인 뒤 코드는 `SCHOOL_ASSERTION`으로 서비스 접근을 표시하고 7일 뒤 Google 재인증으로 갱신한다. 2026-10-28 사용자가 직접 선택한 Google 계정 callback에서 이메일 도메인과 signed Workspace `hd`가 모두 `gachon.ac.kr`임을 확인했다. 검증 전용이어서 계정·세션은 생성하지 않았다. 글로벌캠퍼스는 확정했고 학과 포맷·별칭, 승하차 지점, 운영·법적 정책은 미확정이다.
 
 2026-10-28 공식 자료 확인: 가천대학교는 글로벌캠퍼스(성남)와 메디컬캠퍼스(인천)를 안내한다. 사용자 결정에 따라 첫 서비스 범위는 글로벌캠퍼스로 정했다. 학교 선택 UI는 두지 않는다. [가천대학교 공식 캠퍼스 안내](https://www.gachon.ac.kr/eng/12692/subview.do)
 
@@ -81,7 +81,7 @@ Google Auth Platform 콘솔: [campus-ride-gachon](https://console.cloud.google.c
 
 **로컬 검증 결과:** `npm run test:unit` 6개, `npm run test:integration` 23개, `npm run test:e2e` 2개 통과. Workers/D1 통합은 합성 Google discovery·토큰·JWKS를 사용해 유효/위조 서명, issuer·audience·nonce·만료, email/`hd`, state 재사용·다른 브라우저, 정지/만료 계정, CSRF, 관리자 trigger, 동의 버전·철회와 학과 파서를 확인했다. `npm run lint`, `typecheck`, `build`, 로컬 migration도 통과했다.
 
-**외부 검증 대기:** 학교 계정 자체를 이용 자격으로 삼는 정책과 글로벌캠퍼스 범위는 결정됐고 로컬 코드/문서에 반영했다. Google Cloud 프로젝트·OAuth app/client·staging Client ID/Secret을 연결해 `SCHOOL_CONFIG_READY=false`인 상태로 배포했다. 실제 Workspace `hd` claim과 콘솔의 support email 값을 확인하지 않았고, 학과 규칙·정책 URL/내용도 미확정이다. 실제 Google provider 로그인은 아직 시험하지 않았다.
+**당시 외부 검증 대기:** 이 기록 작성 시점에는 Google Cloud 프로젝트·OAuth app/client·staging Client ID/Secret만 연결했고 실제 Workspace `hd` claim은 미확인 상태였다. 이후 사용자가 직접 계정을 선택한 staging callback에서 이메일 도메인과 signed `hd`가 모두 `gachon.ac.kr`임을 확인했다(§9). 학과 규칙·정책 URL/내용은 여전히 미확정이다.
 
 **완료 기준:** AC-01·AC-02를 통과하고, Gachon OIDC 인증 계정은 동의 완료 후 즉시 학생 기능을 사용할 수 있다. 학과 후보 추출과 검증된 학과가 화면/DB에서 구분된다.
 
@@ -142,7 +142,9 @@ Google Auth Platform 콘솔: [campus-ride-gachon](https://console.cloud.google.c
 - [x] 위치 조회 시 관계·자격·상태·동의를 재검증하고 `no-store`를 설정한다.
 - [x] 숨겨진 화면의 수집/조회 중지, 화면 복귀 후 조회 재개·오류 backoff를 구현한다. 위치 수집은 사용자 동작 후 다시 시작한다.
 - [x] 위치 거절·시간 초과·오차 과다·낡은 위치에서 지정 지점+코드 대안을 제공한다.
-- [ ] 위치정보법상 운영자 지위·필요 신고/등록을 검토하고, 제3자 위치 제공 매회 통지 또는 별도 동의에 따른 모아 통지와 제공사실 확인자료 기록·보유기간을 확정해 구현한다.
+- [x] 새 위치 sequence마다 상대/요청 시각/목적을 알리고 소유자가 사전 안내 확인 버튼을 누르기 전에는 좌표를 반환하지 않는다. 실제 제공 시각과 제공 후 별도 확인 버튼을 누른 시각을 기록한다.
+- [x] 본인 위치 제공 내역을 계정 설정에서 확인하고 새 sequence 반복 응답은 차단한다. 위치 동의 철회/탈퇴 시 본인 위치 제공자료와 소유자 접근로그는 온라인 DB에서 삭제한다. API/D1 회귀를 추가했다.
+- [ ] 위치정보법상 운영자 지위·필요 신고/등록, 동의 철회 시 확인자료 파기와 D1 백업의 관계, 실제 제공·통지 방식을 확인한다. Cloudflare 위치시스템 권한 변경대장을 구성하고 실기기에서 알림/철회 흐름을 검증한다.
 
 **검증:** iOS Safari·Android Chrome에서 권한 허용/거절/철회, 화면 잠금, 탭 전환, 저정확도, 지연 업로드, 네트워크 단절을 확인한다. 취소 후 조회/늦은 업로드를 시도하고, 다른 승객·일반 학생·운영자의 임의 좌표 접근을 거절한다.
 
@@ -166,9 +168,13 @@ Google Auth Platform 콘솔: [campus-ride-gachon](https://console.cloud.google.c
 - [x] 학생 자격 만료·계정 정지가 진행 중 요청/운행에 미치는 처리를 구현한다.
 - [x] 지점·노선·학생/운전자 확인용 최소 운영 UI와 권한을 구현한다.
 - [x] 개인정보·위치 수집/상대 제공·철회·계정 삭제 화면을 완성한다.
+- [x] 계정 탈퇴 trigger가 차단 관계를 정리하고 위치 제공 내역의 탈퇴 사용자 닉네임을 가명화한다. 개인정보 이력 전부가 삭제되는 것은 아니다.
 - [x] 운영자 확인으로 Workers Free 플랜을 기록하고, staging D1의 `production` backend·APAC region·현재 Time Travel bookmark를 확인한다. 공식 Free Time Travel 복구 창은 7일이다.
-- [ ] 복구로 탈퇴 전 정보가 되살아날 위험을 포함해 서비스의 보관·삭제·복구 절차를 승인한다. 법적 보관기간과 계정별 삭제 정책은 임의로 정하지 않는다.
-- [ ] 법적 확인자료 적용 여부를 확인하고, 별도 위치 제공 기록에 실제 통지 증빙·보유기간을 반영한다. 로컬 제공 기록만으로 법적 요건을 충족했다고 간주하지 않는다.
+- [x] 4개 정책 문서와 운영 문서에 보유기간, 탈퇴·위치 동의 철회 시 정리, 7일 D1 Time Travel 복구 후 삭제/철회 재적용 절차를 정했다. 180일 운행/요청, 종결 후 1년 신고, 철회 후 1년 동의, 최대 6개월 위치 제공사실, 최대 1년 위치 API 접근기록을 cleanup에 연결했다. 위치 제공자료는 위치 동의 철회 또는 탈퇴 때 본인 위치와 관련된 행을 온라인 DB에서 즉시 지운다.
+- [x] 위치 제공 전·후 소유자가 각 안내 확인 버튼을 눌렀을 때만 확인 시각을 기록하도록 API를 바꾸고 Workers/D1 테스트로 순서를 확인한다.
+- [x] 위치 확인 필드는 실제 시스템 전송과 혼동되지 않도록 소유자가 제공 후 안내 확인 버튼을 누른 시각을 기록하고, `post_notice_acknowledged_at` 이름을 사용한다. 화면 렌더링이나 polling으로 자동 기록하지 않는다.
+- [ ] 실제 운영자·담당자 문의처를 입력한다. 암호화된 D1 외부 삭제/철회 대조부와 5년 Cloudflare 권한대장을 실제 구성·점검하고 복구 훈련한다.
+- [ ] 위치정보 사업자 분류·신고/등록 해당 여부, Cloudflare 계약상 법인·처리/이전 국가와 재수탁자 내용을 확인한다. 문서는 이 확인 전까지 게시/동의에 사용하지 않는다.
 - [x] Worker 응답에 동일 origin CSP·위치 Permissions-Policy를 적용하고, 사용자별 요청/코드 제한을 확인한다. Worker 애플리케이션 로그는 민감값을 출력하지 않는다.
 - [x] Wrangler에서 query string redaction과 invocation URL 로그 비활성화를 설정하고, Cron 정리 성공/지연/실패를 안전한 구조화 로그로 남긴다.
 - [x] 운영자가 확인한 Workers Free 플랜의 로그 한도·보존·비용 조건을 공식 문서와 staging 설정에 대조한다. 2026-11-30까지 200,000 이벤트/일·3일 보존, 2026-12-01부터 무료 0.5GB/일·7일 보존이며 Free 한도 초과 시 수집이 중단된다. 실제 사용량은 측정하지 않았다.
@@ -187,7 +193,7 @@ Google Auth Platform 콘솔: [campus-ride-gachon](https://console.cloud.google.c
 
 2026-10-28 추가: 학생/운전자 확인 대기열에 더해 지점·노선 등록·수정·비활성 운영 화면을 구현했다. `0015_admin_catalog.sql`은 활성 운영자의 학교/캠퍼스 범위와 감사 이벤트를 강제하고, 활성 운행 중인 지점/노선 변경·직접 삭제를 거절한다. 로컬 합성 seed에만 가상 운영자 계정을 넣었으며 실제 학교 지점·좌표는 만들지 않았다. Workers/D1 통합 44개, lint/typecheck/build 통과. 이 P6 운영 UI 체크를 완료했다. 삭제·보관 정책, 정리 작업 관측과 P5 실기기 검증은 계속 남아 있다.
 
-2026-10-28 추가: TERMS/PRIVACY와 두 위치 동의를 상시 설정 화면에서 관리하고, 최근 로그인·CSRF를 요구하는 계정 탈퇴 API를 연결했다. `0016_account_deletion.sql`은 진행 활동·세션·최신 좌표를 정리하고 직접 식별 정보와 차량 식별 정보를 제거하며 사용자 기록의 동의를 철회 상태로 남긴다. 신고·운행·감사·동의 이력과 백업은 정책/플랫폼 확인 전까지 남을 수 있음을 화면에 고지한다. Workers/D1 통합 45개, lint/typecheck/build 통과. 보관기간·D1 복구/삭제 한계는 미정이므로 관련 P6 체크는 남아 있다.
+2026-10-28 추가: TERMS/PRIVACY와 두 위치 동의를 상시 설정 화면에서 관리하고, 최근 로그인·CSRF를 요구하는 계정 탈퇴 API를 연결했다. `0016_account_deletion.sql`은 진행 활동·세션·최신 좌표를 정리하고 직접 식별 정보와 차량 식별 정보를 제거하며 사용자 기록의 동의를 철회 상태로 남긴다. `0019_delete_related_identity.sql`은 차단 관계를 제거하고 위치 제공 내역의 탈퇴 사용자 닉네임을 가명화한다. 신고·운행·감사·동의 이력과 D1 복구 사본은 별도 보관/삭제 절차 전까지 남을 수 있다. 일반 보유기간과 복구 후 재적용 절차가 미정이라 P6 정책 승인은 보류한다.
 
 2026-10-28 추가: Cloudflare 공식 문서에서 D1 Time Travel의 Free 7일/Paid 30일 복구 창, production backend 요구, DB 전체 덮어쓰기 복구를 확인해 Architecture §29에 반영했다. 과거 시점 복구가 탈퇴 전 정보를 다시 살릴 수 있다는 운영 위험을 기록했다. 현재 wrangler 설정은 로컬 전용 DB와 원격 placeholder뿐이라 계정 요금제·실제 DB backend를 확인할 수 없고 법적 보관기간도 미확정이므로 정책 체크는 완료 처리하지 않았다.
 
@@ -197,9 +203,19 @@ Google Auth Platform 콘솔: [campus-ride-gachon](https://console.cloud.google.c
 
 2026-10-28 추가: 연결된 Cloudflare 계정에 대해 staging Worker/D1 설정을 읽기 전용으로 확인했다. `campus-ride-staging` D1에 16개 migration이 적용됐고 backend는 `production`, region은 APAC, jurisdiction은 미설정이다. 운영자가 Workers Free 플랜이며 도메인 등록은 별도 결제라고 확인했다. 현재 Time Travel bookmark도 조회했다. 공식 문서상 Free 복구 창은 7일이다. Worker는 DB 바인딩 연결, observability/logs 활성화, query redaction, invocation URL 비활성, persist 설정을 갖췄다. Workers Free 로그는 2026-11-30까지 200,000 이벤트/일·3일 보존, 2026-12-01부터 무료 0.5GB/일·7일 보존으로 전환된다. Billing Read API 권한이 없어 플랜을 API로 독립 확인하거나 실제 사용량을 조회하지는 못했으나 운영자 제공 정보를 기준으로 plan-level 항목을 기록했다. 보관·복구 절차 승인과 법적 보관기간은 남아 P6 미완료다. 학교 준비/개발 인증은 false이며 staging API는 503으로 닫혀 있다. 합성 seed나 학교 데이터는 올리지 않았다.
 
+2026-10-28 추가: 보유기간과 복구 시 탈퇴/철회 재적용 절차를 네 정책 문서 및 `docs/operations/data-retention-and-restore.md`에 확정안으로 정했다. 계정 탈퇴 시 직접 식별값 대체/세션·현재 위치·차단 정리, 종료 요청/운행 180일, 종결 신고·동의/일반 감사 1년, 위치 제공사실 6개월, 위치 API 접근기록 1년, D1 Free 복구 창 7일을 반영했다. Cron cleanup 및 deletion tombstone 만료 회귀를 추가했다.
+
+2026-10-28 추가: location sequence는 소유자가 사전 안내 확인 버튼을 누르기 전 좌표를 반환하지 않는다. 실제 위치 제공 시각과 제공 후 안내 확인 버튼을 누른 시각을 별도 기록한다(`post_notice_acknowledged_at`). 위치 소유자의 동의 철회/탈퇴 시 본인 위치 제공 확인자료·owner별 접근기록을 온라인 DB에서 삭제한다. 제공자 화면 활성 heartbeat와 동일 sequence 1회 응답을 적용했다. 위치 API 통합 검증으로 알림 gate·CSRF·제공 시각·철회 자료 삭제를 확인한다. 위치정보법 적용 여부, 즉시 통지·백업 파기 해석, D1 외부 대조부, 외부 접근권한 대장과 staging 복구 훈련은 남아 원격 API를 열지 않는다. 새 migration `0020_location_notice_and_access_log.sql`은 로컬 테스트에는 적용됐지만 원격 staging D1에는 아직 적용하지 않았다.
+
+정책 문서는 확정안이지만 시행 전이다. 실제 운영자 연락처, 위치정보 사업자 분류/신고·등록 여부, 위치 동의 철회와 D1 백업 사본의 법적 처리, Cloudflare 외부 삭제/철회 대조부와 5년 권한대장, 실제 복구 훈련이 남아 staging 일반 API는 503 차단 상태로 유지한다.
+
+2026-10-28 로컬 검증: `npm run lint`, `typecheck`, `test:unit`(24), `test:integration`(49), `test:e2e`(6), `build`가 통과했다. `git diff --check`도 문서 수정 뒤 통과했다. 실기기·D1 복구 훈련은 수행하지 않았고 migration `0020`은 로컬에만 적용했다. staging 원격 변경·배포·일반 API 개방은 하지 않았다.
+
 ## 9. P7 — staging 배포와 통합 검증
 
-- [ ] staging Worker/D1에 migration·설정·Secrets·Google redirect를 적용한다.
+- [x] staging D1 migration과 exact school-domain 설정을 적용하되, `SCHOOL_CONFIG_READY=false`로 유지한다. auth-test-only에서 Google 로그인 경로만 노출한다.
+- [x] 사용자가 직접 선택한 Google 계정의 이메일 도메인과 signed Workspace `hd`가 모두 `gachon.ac.kr`임을 확인했다. callback은 계정/세션 없이 검증 결과만 반환했다.
+- [ ] 정책·운영 승인 후에만 별도 staging 개방 변경을 검토한다. 일반 API는 그 전까지 계속 닫는다.
 - [ ] 테스트 계정 2개 이상으로 로그인→요청→수락→위치→코드→출발→완료를 검증한다.
 - [ ] 다인 탑승, 같은 학과/다른 학과, 성별 제한, 노쇼, 운행 중단을 확인한다.
 - [ ] 마지막 좌석 경쟁·멱등 재시도·권한 철회·ID 추측 공격의 통합 회귀를 통과한다.
@@ -211,7 +227,7 @@ Google Auth Platform 콘솔: [campus-ride-gachon](https://console.cloud.google.c
 
 **완료 기준:** AC-01~AC-11, 핵심 E2E와 실제 모바일 시험이 통과한다. 성능 결과에는 실제 측정 환경·표본·실패율을 남기고 임의의 처리 성능을 주장하지 않는다. staging 배포 완료와 운영 공개 완료를 구분한다.
 
-2026-10-28: staging D1/Worker 기본 인프라를 생성·연결하고 migration을 적용했다. Vite Cloudflare plugin 설정에 따라 `CLOUDFLARE_ENV=staging npm run build` 후 배포하도록 연결했으며, `workers_dev`에서 정적 화면만 공개하고 준비되지 않은 API는 503으로 차단한다. OAuth client ID와 올바른 secret binding을 추가한 뒤 `npm run deploy:staging`으로 닫힌 설정을 다시 배포했다. 이 단계는 실제 Google 로그인·학교 계정 통합·P7 수용 시나리오 검증을 완료한 뜻이 아니므로 위 항목은 미체크 상태다.
+2026-10-28: staging D1/Worker 기본 인프라·Google 검증 전용 설정이 연결되어 있고, auth-test-only는 로그인 시작/callback 외 API와 개발 인증을 503으로 막는다. 사용자가 직접 선택한 Google 계정 callback에서 `gachon.ac.kr` 이메일 도메인과 signed `hd`를 확인했으며 계정·세션은 만들지 않았다. 로컬 Chromium E2E 6개는 통과했지만 staging의 두 실제 계정 전체 흐름, 모바일, 부하, 복구 검증은 미완료다. staging 일반 API는 계속 닫혀 있다.
 
 ## 10. P8 — 제한 파일럿과 공개 판단
 
@@ -231,6 +247,6 @@ Google Auth Platform 콘솔: [campus-ride-gachon](https://console.cloud.google.c
 
 ## 12. 다음 작업자에게 넘길 상태
 
-**현재 완료:** 네 설계 문서, P1~P4 로컬 구현, P5 위치 공유 핵심 흐름과 가상 위치도, P6 신고·학생 차단·운영자 정지·자격 만료 정리, 확인 대기열, 지점·노선 운영, 동의 설정과 계정 탈퇴 1차, Cron 정리 관측·한정 재시도. Cloudflare staging D1/Worker 생성, 16개 migration, 안전하게 닫힌 staging 배포. Private GitHub 저장소 `JooJeongwon/campus-ride` 생성과 `origin` 연결. React/Vite·Hono·Zod·strict TypeScript, D1 migration·합성 seed/로컬 리셋, 보호 API·Workers/D1 검증·CI 설정.
+**현재 완료:** 네 설계 문서, P1~P4 로컬 구현, P5 위치 공유 핵심 흐름과 가상 위치도, P6 신고·차단·제한·운영 UI·계정 탈퇴 정리, Cron 관측·한정 재시도. Cloudflare staging D1/Worker와 migration, Google OIDC 검증 전용 staging 설정(일반 API 차단). Private GitHub 저장소 `JooJeongwon/campus-ride`와 `origin`. React/Vite·Hono·Zod·strict TypeScript, D1 migration·합성 seed/로컬 리셋, 보호 API·Workers/D1 검증·CI 설정.
 
-**다음 실제 작업:** NAVER Cloud Platform 콘솔에서 `AI·NAVER API > Application > 대표 계정 확인` 결과를 확인한다. 대표 계정이면 Campus Ride custom hostname을 정한 뒤 그 도메인을 Web Dynamic Map 앱에 등록하고 사용량 한도·알림을 설정한다. 대표 계정이 아니면 Maps 앱을 만들지 말고 Kakao 첫 활성 앱의 무료 쿼터 자격을 확인한다. 도메인은 Cloudflare zone `jwjoo.com` 안에서 정하고 Google OAuth callback 허용 주소도 함께 갱신한다. 공급자/호스트가 정해지면 SDK를 연결하고 글로벌캠퍼스에서 실제 표시 품질을 확인한다. 별도로 글로벌캠퍼스 계정으로 staging에서 실제 Workspace `hd` claim을 확인하고, 학과 규칙·승하차 지점·정책 문구/URL·운전자 확인 담당자를 확정한다. staging API는 필수 설정을 검증한 뒤 연다. 운영 주체는 법적 보관기간과 탈퇴 데이터 복구·재적용 절차도 승인해야 한다. 그 전까지 탈퇴 이력·Time Travel 데이터의 즉시 완전 삭제는 보장하지 않는다. Workers Free 로그 한도 변경은 2026-12-01부터 적용되므로 운영 전 사용량을 점검한다. Production D1/Worker는 만들지 않았다.
+**다음 실제 작업:** 실제 운영자 이름/주소/이메일/전화, 위치정보 사업자 분류·신고 여부, Cloudflare 계약상 법인·처리/이전 국가를 확인한다. D1 밖 암호화 삭제/철회 대조부와 5년 위치시스템 권한대장을 만들어 복구 훈련을 마친다. 그 뒤 staging migration 0020을 닫힌 API 상태로 원격 적용하고 복구 후 삭제 재적용을 검증한다. 일반 API는 그 전까지 계속 503으로 닫는다. 지도 공급자·캠퍼스 지점·실기기 검증 및 실제 사용자 E2E도 미완료다. Production D1/Worker는 만들지 않았다.

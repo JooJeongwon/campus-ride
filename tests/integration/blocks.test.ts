@@ -135,6 +135,9 @@ it('audits a peer block, ends the active relation, and does not reopen it on unb
     }
     await env.DB.prepare('DELETE FROM consents WHERE user_id=?').bind(riderId).run();
     await env.DB.prepare('DELETE FROM active_user_locks WHERE user_id IN (?,?)').bind(riderId, driverId).run();
+    await env.DB.prepare('DELETE FROM location_access_records WHERE user_id IN (?,?) OR location_owner_user_id IN (?,?)')
+      .bind(riderId, driverId, riderId, driverId).run();
+    await env.DB.prepare('DELETE FROM location_notice_presence WHERE user_id IN (?,?)').bind(riderId, driverId).run();
     if (requestId) {
       await env.DB.prepare('DELETE FROM idempotency_keys WHERE user_id=? AND operation=?')
         .bind(riderId, 'CREATE_REQUEST').run();
@@ -226,6 +229,9 @@ it('aborts a boarded trip and deletes both parties’ locations after a block', 
     await env.DB.prepare('DELETE FROM consents WHERE user_id IN (?,?)').bind(riderId, driverId).run();
     await env.DB.prepare('DELETE FROM sessions WHERE user_id=?').bind(driverId).run();
     await env.DB.prepare('DELETE FROM active_user_locks WHERE user_id IN (?,?)').bind(riderId, driverId).run();
+    await env.DB.prepare('DELETE FROM location_access_records WHERE user_id IN (?,?) OR location_owner_user_id IN (?,?)')
+      .bind(riderId, driverId, riderId, driverId).run();
+    await env.DB.prepare('DELETE FROM location_notice_presence WHERE user_id IN (?,?)').bind(riderId, driverId).run();
     if (requestId) {
       await env.DB.prepare('DELETE FROM idempotency_keys WHERE user_id=?').bind(riderId).run();
       await env.DB.prepare('DELETE FROM ride_requests WHERE id=?').bind(requestId).run();
@@ -312,6 +318,10 @@ it('cancels both unboarded peers’ requests while leaving their driver trip ope
       .bind(riderId, driverId, secondRiderId).run();
     await env.DB.prepare('DELETE FROM sessions WHERE user_id IN (?,?)').bind(driverId, secondRiderId).run();
     await env.DB.prepare('DELETE FROM active_user_locks WHERE user_id IN (?,?,?)')
+      .bind(riderId, driverId, secondRiderId).run();
+    await env.DB.prepare('DELETE FROM location_access_records WHERE user_id IN (?,?,?) OR location_owner_user_id IN (?,?,?)')
+      .bind(riderId, driverId, secondRiderId, riderId, driverId, secondRiderId).run();
+    await env.DB.prepare('DELETE FROM location_notice_presence WHERE user_id IN (?,?,?)')
       .bind(riderId, driverId, secondRiderId).run();
     await env.DB.prepare('DELETE FROM idempotency_keys WHERE user_id IN (?,?,?)')
       .bind(riderId, driverId, secondRiderId).run();

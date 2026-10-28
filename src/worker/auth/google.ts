@@ -14,16 +14,19 @@ export function callbackUri(env: Bindings): string {
 }
 
 export function isGoogleConfigured(env: Bindings): boolean {
-  return env.SCHOOL_CONFIG_READY === 'true'
-    && Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.CSRF_HMAC_KEY)
-    && environmentReady(env);
+  const authTestOnly = env.APP_ENV === 'staging' && env.STAGING_AUTH_TEST_ONLY === 'true'
+    && env.SCHOOL_CONFIG_READY === 'false' && env.ALLOW_DEV_AUTH === 'false'
+    && env.SCHOOL_ID === 'gachon-university' && env.CAMPUS_ID === 'gachon-global-campus'
+    && allowedDomains(env.ALLOWED_EMAIL_DOMAINS).join(',') === 'gachon.ac.kr'
+    && allowedDomains(env.ALLOWED_HOSTED_DOMAINS).join(',') === 'gachon.ac.kr';
+  return Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.CSRF_HMAC_KEY)
+    && (authTestOnly || (env.SCHOOL_CONFIG_READY === 'true' && environmentReady(env)));
 }
 
 function environmentReady(env: Bindings): boolean {
   return Boolean(env.SCHOOL_ID && env.CAMPUS_ID
-    && ['MANUAL_REVIEW', 'SCHOOL_ASSERTION'].includes(env.STUDENT_VERIFICATION_MODE ?? '')
+    && env.STUDENT_VERIFICATION_MODE === 'SCHOOL_ASSERTION'
     && allowedDomains(env.ALLOWED_EMAIL_DOMAINS).length && allowedDomains(env.ALLOWED_HOSTED_DOMAINS).length
-    && env.DEPARTMENT_TEMPLATE && env.DEPARTMENT_ALIASES_JSON
     && env.POLICY_TERMS_VERSION && env.POLICY_TERMS_URL && env.POLICY_PRIVACY_VERSION && env.POLICY_PRIVACY_URL);
 }
 
@@ -144,7 +147,7 @@ export async function consumeAuthorizationResponse(
     departmentCode: department.code,
     departmentStatus: department.status,
     departmentSource,
-    parserVersion: env.DEPARTMENT_PARSER_VERSION ?? 'synthetic-v1',
+    parserVersion: env.DEPARTMENT_PARSER_VERSION ?? null,
     returnPath: request.safe_return_path,
   };
 }

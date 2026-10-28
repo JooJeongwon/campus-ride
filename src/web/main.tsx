@@ -22,11 +22,12 @@ function locationFreshness(receivedAt: number) {
 type ConsentKind = 'TERMS' | 'PRIVACY' | 'LOCATION_COLLECTION' | 'LOCATION_SHARING';
 type ConsentState = { version: string; url: string | null; accepted: boolean };
 type LocationPoint = {
-  nickname: string; role: 'DRIVER' | 'RIDER'; lat: number; lng: number; accuracyM: number;
+  key: string; nickname: string; role: 'DRIVER' | 'RIDER'; lat: number; lng: number; accuracyM: number;
   capturedAt: number; receivedAt: number; expiresAt: number; sequence: number;
 };
 type LocationDisclosure = {
-  id: string; recipientNickname: string; recipientRole: 'DRIVER' | 'RIDER'; purpose: 'MEETING'; providedAt: number;
+  id: string; recipientNickname: string; recipientRole: 'DRIVER' | 'RIDER'; purpose: 'MEETING'; requestedAt: number;
+  providedAt: number | null; noticeAcknowledgedAt: number | null; postNoticeAcknowledgedAt: number | null;
 };
 
 function VirtualLocationMap({
@@ -35,7 +36,7 @@ function VirtualLocationMap({
   shared,
 }: {
   stop: { name: string; lat: number; lng: number };
-  own: Omit<LocationPoint, 'nickname' | 'role'> | null;
+  own: Omit<LocationPoint, 'nickname' | 'role' | 'key'> | null;
   shared: LocationPoint[];
 }) {
   const markers = [
@@ -44,7 +45,7 @@ function VirtualLocationMap({
       lat: own.lat, lng: own.lng, accuracyM: own.accuracyM,
     }] : []),
     ...shared.filter((point) => isLocationFresh(point.receivedAt)).map((point) => ({
-      id: `${point.role}-${point.sequence}`,
+      id: point.key,
       label: point.role === 'DRIVER' ? '운전자 위치' : `${point.nickname} 위치`,
       kind: 'peer' as const, lat: point.lat, lng: point.lng, accuracyM: point.accuracyM,
     })),
@@ -126,7 +127,7 @@ function App() {
   const [consentBusy, setConsentBusy] = useState(false);
   const [locationStarted, setLocationStarted] = useState(false);
   const [locationStatus, setLocationStatus] = useState('');
-  const [ownLocation, setOwnLocation] = useState<Omit<LocationPoint, 'nickname' | 'role'> | null>(null);
+  const [ownLocation, setOwnLocation] = useState<Omit<LocationPoint, 'nickname' | 'role' | 'key'> | null>(null);
   const [sharedLocations, setSharedLocations] = useState<LocationPoint[]>([]);
   const [locationDisclosures, setLocationDisclosures] = useState<LocationDisclosure[]>([]);
   const [locationStop, setLocationStop] = useState<{ name: string; lat: number; lng: number } | null>(null);
@@ -138,7 +139,6 @@ function App() {
   const locationWatch = useRef<number | null>(null);
   const locationSequence = useRef(0);
   const lastLocationUpload = useRef(0);
-  const knownLocationDisclosures = useRef(new Set<string>());
   async function refreshMe(revision = profileRevision.current) {
     const response = await fetch('/api/v1/me', { cache: 'no-store' });
     if (!response.ok) return null;
@@ -683,13 +683,12 @@ function App() {
       setProfile(updatedProfile);
       setMessage(granted ? '동의 상태를 저장했습니다.' : '동의를 철회했습니다.');
       if (!granted && kind.startsWith('LOCATION_')) {
+        setLocationDisclosures([]);
         if (locationWatch.current !== null) navigator.geolocation?.clearWatch(locationWatch.current);
         locationWatch.current = null;
         setLocationStarted(false);
         setOwnLocation(null);
         setSharedLocations([]);
-        setLocationDisclosures([]);
-        knownLocationDisclosures.current.clear();
         setLocationStatus('위치 동의를 철회했습니다. 공유 위치를 삭제했습니다.');
       }
     } catch {
@@ -775,6 +774,34 @@ function App() {
       setLocationStatus('위치 공유 관계를 확인하지 못했습니다. 새로고침 후 다시 시도해 주세요.');
     }
   }
+  async function acknowledgeLocationDisclosure(disclosure: LocationDisclosure) {
+    if (!profile || actionBusy) return;
+    const revision = profileRevision.current;
+    setActionBusy(true);
+    try {
+      const response = await fetch('/api/v1/locations/me/disclosures/ack', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': profile.csrfToken },
+        body: JSON.stringify({ disclosureIds: [disclosure.id] }),
+      });
+      const payload = await response.json().catch(() => null) as {
+        data?: { acknowledgedAt: number; disclosureIds: string[] }; error?: { message?: string };
+      } | null;
+      if (revision !== profileRevision.current) return;
+      if (!response.ok || !payload?.data?.disclosureIds.includes(disclosure.id)) {
+        setMessage(payload?.error?.message ?? '위치 안내 확인을 저장하지 못했습니다. 내역을 새로고침해 주세요.');
+        return;
+      }
+      const acknowledgedAt = payload.data.acknowledgedAt;
+      setLocationDisclosures((current) => current.map((item) => item.id !== disclosure.id ? item : item.providedAt === null
+        ? { ...item, noticeAcknowledgedAt: acknowledgedAt }
+        : { ...item, postNoticeAcknowledgedAt: acknowledgedAt }));
+      setMessage('위치 안내 확인을 기록했습니다.');
+    } catch {
+      if (revision === profileRevision.current) setMessage('연결이 끊겨 위치 안내 확인을 저장하지 못했습니다. 내역을 새로고침해 주세요.');
+    } finally {
+      if (revision === profileRevision.current) setActionBusy(false);
+    }
+  }
   async function logout() {
     if (!profile) return;
     const revision = profileRevision.current;
@@ -790,12 +817,11 @@ function App() {
     setOwnLocation(null);
     setSharedLocations([]);
     setLocationDisclosures([]);
-    knownLocationDisclosures.current.clear();
     setLocationStop(null);
     setMessage('로그아웃했습니다.');
   }
   async function deleteAccount() {
-    if (!profile || actionBusy || !window.confirm('계정을 탈퇴할까요? 진행 중 요청과 운행은 종료됩니다. 프로필·로그인 식별 정보와 차량 식별 정보는 제거되지만, 관련 운행·신고·동의·감사 기록과 D1 백업은 보관 정책에 따라 남을 수 있습니다. 실제 보관기간은 아직 확정되지 않았습니다.')) return;
+    if (!profile || actionBusy || !window.confirm('계정을 탈퇴할까요? 직접 식별정보와 현재 위치를 정리하고 진행 중 운행·요청을 종료합니다. 일부 운행·신고·동의·위치 확인 기록은 정해진 기간 보관됩니다. D1의 7일 복구 창 안에 삭제 전 정보가 되살아날 수 있어 복구 시 탈퇴 기록을 다시 적용합니다.')) return;
     const revision = profileRevision.current;
     setActionBusy(true);
     try {
@@ -811,9 +837,8 @@ function App() {
       profileRevision.current += 1;
       stopLocationWatch();
       setProfile(null); setTripRequests([]); setOwnLocation(null); setSharedLocations([]); setLocationDisclosures([]); setLocationStop(null);
-      knownLocationDisclosures.current.clear();
       setBoardingCodes({});
-      setMessage('계정 탈퇴를 완료했습니다. 관련 기록과 백업은 보관 정책에 따라 남을 수 있습니다.');
+      setMessage('계정 탈퇴를 처리했습니다. 연결된 일부 기록은 정해진 기간 보관되며 D1 복구 창에서는 삭제 전 상태가 복원될 수 있습니다.');
     } catch {
       setMessage('연결이 끊겼습니다. 로그인 여부를 확인해 탈퇴 결과를 확인해 주세요.');
     } finally {
@@ -921,14 +946,25 @@ function App() {
     };
   }, []);
   useEffect(() => {
-    setLocationDisclosures([]);
-    knownLocationDisclosures.current.clear();
     if (activeLocationContext && locationConsented) return;
     stopLocationWatch();
     setOwnLocation(null);
     setSharedLocations([]);
     setLocationStop(null);
-  }, [activeLocationContext?.tripId, activeLocationContext?.requestId, locationConsented]);
+  }, [activeLocationContext?.tripId, activeLocationContext?.requestId, locationConsented, profile?.csrfToken]);
+  useEffect(() => {
+    setLocationDisclosures([]);
+    if (!profile?.id || !profile.requiredConsents.TERMS.accepted || !profile.requiredConsents.PRIVACY.accepted) return;
+    const revision = profileRevision.current;
+    const controller = new AbortController();
+    void fetch('/api/v1/locations/me', { signal: controller.signal, cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const data = (await response.json() as { data: { disclosures: LocationDisclosure[] } }).data;
+        if (!controller.signal.aborted && revision === profileRevision.current) setLocationDisclosures(data.disclosures);
+      }).catch(() => {});
+    return () => controller.abort();
+  }, [profile?.id, profile?.requiredConsents.TERMS.accepted, profile?.requiredConsents.PRIVACY.accepted]);
   useEffect(() => {
     if (!activeLocationContext || !locationConsented) return;
     let stopped = false;
@@ -953,16 +989,12 @@ function App() {
         locationSequence.current = Math.max(locationSequence.current, own.data.sequence);
         setOwnLocation(own.data.location);
         setLocationDisclosures(own.data.disclosures);
-        const unseen = own.data.disclosures.filter((disclosure) => !knownLocationDisclosures.current.has(disclosure.id));
-        own.data.disclosures.forEach((disclosure) => knownLocationDisclosures.current.add(disclosure.id));
-        if (unseen.length) {
-          const disclosure = unseen[0];
-          const role = disclosure.recipientRole === 'DRIVER' ? '운전자' : '탑승자';
-          const notice = unseen.length > 1 ? `새 위치 제공 내역 ${unseen.length}건. 최근 내 위치가` : '내 위치가';
-          setLocationStatus(`${notice} ${disclosure.recipientNickname} (${role})에게 ${new Date(disclosure.providedAt).toLocaleString('ko-KR')} 만남 조율 목적으로 제공되었습니다.`);
-        }
         setLocationStop(peers.data.stop);
-        setSharedLocations(peers.data.locations);
+        setSharedLocations((current) => {
+          const incomingKeys = new Set(peers.data.locations.map(({ key }) => key));
+          const retained = current.filter((point) => point.expiresAt > Date.now() && !incomingKeys.has(point.key));
+          return [...retained, ...peers.data.locations];
+        });
         delay = 5_000;
       } catch {
         if (!controller.signal.aborted) {
@@ -1020,6 +1052,28 @@ function App() {
                   : '로컬 개발용 동의 체험입니다. 실제 약관이나 개인정보 처리 안내가 아니며 합성 계정만 사용합니다.'}</p>}
             </div>;
           })}
+          <h4>내 위치 제공 내역</h4>
+          {locationDisclosures.length ? <ul aria-label="내 위치 제공 내역">
+            {locationDisclosures.map((disclosure) => {
+              const recipientRole = disclosure.recipientRole === 'DRIVER' ? '운전자' : '탑승자';
+              const needsPreNoticeAck = disclosure.providedAt === null && disclosure.noticeAcknowledgedAt === null;
+              const needsPostNoticeAck = disclosure.providedAt !== null && disclosure.postNoticeAcknowledgedAt === null;
+              return <li key={disclosure.id}>
+                {disclosure.recipientNickname} ({recipientRole}) ·{' '}
+                {disclosure.providedAt === null
+                  ? `요청 ${new Date(disclosure.requestedAt).toLocaleString('ko-KR')} · ${disclosure.noticeAcknowledgedAt === null ? '알림 확인 전, 위치 미공유' : '알림 확인 완료, 제공 대기'}`
+                  : `${new Date(disclosure.providedAt).toLocaleString('ko-KR')} 제공 · 만남 조율`}
+                {needsPreNoticeAck && <>
+                  <p role="alert">{disclosure.recipientNickname} ({recipientRole})가 {new Date(disclosure.requestedAt).toLocaleString('ko-KR')}에 만남 조율을 위해 위치를 요청했습니다. 확인 전에는 좌표를 공유하지 않습니다.</p>
+                  <button type="button" disabled={actionBusy} onClick={() => void acknowledgeLocationDisclosure(disclosure)}>위치 요청 안내 확인</button>
+                </>}
+                {needsPostNoticeAck && <>
+                  <p role="alert">내 위치가 {disclosure.recipientNickname} ({recipientRole})에게 {new Date(disclosure.providedAt!).toLocaleString('ko-KR')}에 만남 조율 목적으로 제공되었습니다.</p>
+                  <button type="button" disabled={actionBusy} onClick={() => void acknowledgeLocationDisclosure(disclosure)}>위치 제공 안내 확인</button>
+                </>}
+              </li>;
+            })}
+          </ul> : <p>최근 6개월 동안 기록된 위치 제공 내역이 없습니다.</p>}
         </section>
         <form action={(form) => { void updateProfile(form); }}>
           <label>닉네임 <input name="nickname" defaultValue={profile.nickname} maxLength={30} required /></label>
@@ -1242,15 +1296,6 @@ function App() {
               onClick={() => void startLocationSharing(activeLocationContext)}>내 위치 공유 시작</button>
           </div>
           <p role="status">{locationStatus || (locationConsented ? '위치를 갱신하면 동승 상대에게 실제 제공된 내역을 표시합니다.' : '위치 수집과 상대 제공 동의는 각각 선택할 수 있습니다.')}</p>
-          {locationConsented && locationDisclosures.length > 0 && <div>
-            <h4>내 위치 제공 내역</h4>
-            <ul aria-label="내 위치 제공 내역">
-              {locationDisclosures.map((disclosure) => <li key={disclosure.id}>
-                {disclosure.recipientNickname} ({disclosure.recipientRole === 'DRIVER' ? '운전자' : '탑승자'}) ·{' '}
-                {new Date(disclosure.providedAt).toLocaleString('ko-KR')} · 만남 조율
-              </li>)}
-            </ul>
-          </div>}
           {locationConsented && locationStop && <VirtualLocationMap stop={locationStop} own={ownLocation} shared={sharedLocations} />}
           {locationConsented && locationStop && <p>승차 지점 좌표: {locationStop.lat.toFixed(5)}, {locationStop.lng.toFixed(5)}</p>}
           {locationConsented && ownLocation && <div>
@@ -1348,7 +1393,11 @@ function App() {
         </section>
         <button type="button" onClick={() => void logout()}>로그아웃</button>
       </> : <>
-        <p>학교 정보가 확인되지 않아 Google 로그인을 사용할 수 없습니다. 로컬 개발은 준비된 합성 계정만 제공합니다.</p>
+        <p>{import.meta.env.DEV
+          ? '학교 정보가 확인되지 않아 원격 Google 로그인을 사용할 수 없습니다. 로컬 개발은 준비된 합성 계정만 제공합니다.'
+          : import.meta.env.VITE_STAGING_AUTH_TEST_ONLY === 'true'
+            ? '현재 staging은 학교 Google 계정 확인 전용입니다. 로그인 결과만 보여주며 앱 계정·세션은 만들지 않고 나머지 API는 닫혀 있습니다.'
+            : '학교 Google 계정으로 로그인합니다. 현재 이메일 도메인과 Google Workspace 조직을 함께 확인합니다.'}</p>
         {import.meta.env.DEV && <div className="actions">
           <button type="button" onClick={() => void login('driver')}>가상 운전자</button>
           <button type="button" onClick={() => void login('rider')}>가상 탑승자</button>

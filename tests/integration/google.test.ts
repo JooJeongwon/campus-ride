@@ -1,8 +1,9 @@
 import { env } from 'cloudflare:workers';
 import { beforeAll, expect, it, vi } from 'vitest';
 import worker from '../../src/worker';
+import { sha256 } from '../../src/worker/auth/session';
 
-const clientId = 'test-client.apps.googleusercontent.com';
+const clientId = 'ci-client.apps.googleusercontent.com';
 const issuer = 'https://accounts.google.com';
 const discoveryUrl = `${issuer}/.well-known/openid-configuration`;
 const tokenUrl = 'https://oauth2.googleapis.com/token';
@@ -55,26 +56,31 @@ async function beginLogin(
   overrides: Record<string, unknown> = {},
   invalidSignature = false,
   departmentSource: 'EMAIL_LOCAL_PART' | 'GOOGLE_NAME' = 'EMAIL_LOCAL_PART',
+  authTestOnly = false,
 ) {
   const configuredEnv = {
     ...env,
-    SCHOOL_CONFIG_READY: 'true',
-    SCHOOL_ID: 'synthetic-school',
-    CAMPUS_ID: 'synthetic-campus',
+    APP_ENV: authTestOnly ? 'staging' : env.APP_ENV,
+    APP_ORIGIN: authTestOnly ? 'https://campus-ride-staging.jwjoo0512.workers.dev' : env.APP_ORIGIN,
+    SCHOOL_CONFIG_READY: authTestOnly ? 'false' : 'true',
+    ALLOW_DEV_AUTH: authTestOnly ? 'false' : env.ALLOW_DEV_AUTH,
+    STAGING_AUTH_TEST_ONLY: authTestOnly ? 'true' : 'false',
+    SCHOOL_ID: authTestOnly ? 'gachon-university' : 'synthetic-school',
+    CAMPUS_ID: authTestOnly ? 'gachon-global-campus' : 'synthetic-campus',
     ALLOWED_EMAIL_DOMAINS: 'gachon.ac.kr',
     ALLOWED_HOSTED_DOMAINS: 'gachon.ac.kr',
     STUDENT_VERIFICATION_MODE: 'SCHOOL_ASSERTION',
-    DEPARTMENT_SOURCE_FIELD: departmentSource,
-    DEPARTMENT_TEMPLATE: 'student-{id}-{department}',
-    DEPARTMENT_PARSER_VERSION: 'test-v1',
-    DEPARTMENT_ALIASES_JSON: '{"cs":"CS"}',
+    DEPARTMENT_SOURCE_FIELD: authTestOnly ? undefined : departmentSource,
+    DEPARTMENT_TEMPLATE: authTestOnly ? undefined : 'student-{id}-{department}',
+    DEPARTMENT_PARSER_VERSION: authTestOnly ? undefined : 'test-v1',
+    DEPARTMENT_ALIASES_JSON: authTestOnly ? undefined : '{"cs":"CS"}',
     GOOGLE_CLIENT_ID: clientId,
-    GOOGLE_CLIENT_SECRET: 'test-client-secret',
-    CSRF_HMAC_KEY: 'test-csrf-hmac-key-that-is-long-enough',
-    POLICY_TERMS_VERSION: 'terms-test-v1',
-    POLICY_TERMS_URL: 'https://policy.school.edu/terms',
-    POLICY_PRIVACY_VERSION: 'privacy-test-v1',
-    POLICY_PRIVACY_URL: 'https://policy.school.edu/privacy',
+    GOOGLE_CLIENT_SECRET: 'local-ci-secret-that-is-not-a-credential',
+    CSRF_HMAC_KEY: 'local-ci-csrf-key-that-is-long-enough-123',
+    POLICY_TERMS_VERSION: authTestOnly ? undefined : 'terms-test-v1',
+    POLICY_TERMS_URL: authTestOnly ? undefined : 'https://policy.school.edu/terms',
+    POLICY_PRIVACY_VERSION: authTestOnly ? undefined : 'privacy-test-v1',
+    POLICY_PRIVACY_URL: authTestOnly ? undefined : 'https://policy.school.edu/privacy',
   };
   let tokenClaims: Record<string, unknown> | undefined;
   const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
@@ -92,9 +98,10 @@ async function beginLogin(
     }
     throw new Error(`Unexpected outbound request: ${request.method} ${request.url}`);
   });
+  const request = (path: string, init?: RequestInit) => worker.request(new URL(path, configuredEnv.APP_ORIGIN).href, init, configuredEnv);
 
   try {
-    const start = await worker.request('/api/v1/auth/google/start?returnTo=%2Fprofile%3Ftab%3Dconsent', {}, configuredEnv);
+    const start = await request('/api/v1/auth/google/start?returnTo=%2Fprofile%3Ftab%3Dconsent');
     expect(start.status).toBe(302);
     const authorization = new URL(start.headers.get('Location')!);
     expect(authorization.searchParams.get('code_challenge_method')).toBe('S256');
@@ -120,11 +127,12 @@ async function beginLogin(
       oauthCookie,
       state,
       tokenClaims,
-      callback: (cookie = oauthCookie, callbackState = state) => worker.request(
+      callback: (cookie = oauthCookie, callbackState = state) => request(
         `/api/v1/auth/google/callback?code=synthetic-code&state=${encodeURIComponent(callbackState)}`,
-        { headers: { Cookie: cookie } }, configuredEnv,
+        { headers: { Cookie: cookie } },
       ),
-      profile: (cookie: string) => worker.request('/api/v1/me', { headers: { Cookie: cookie } }, configuredEnv),
+      profile: (cookie: string) => request('/api/v1/me', { headers: { Cookie: cookie } }),
+      request,
       close: () => fetchSpy.mockRestore(),
     };
   } catch (error) {
@@ -158,6 +166,28 @@ it('validates Google OIDC and immediately verifies a Gachon account with a bound
     const replay = await flow.callback();
     expect(replay.status).toBe(401);
     expect((await replay.text())).not.toContain(flow.tokenClaims.email as string);
+  } finally {
+    flow.close();
+  }
+});
+
+it('verifies a real-account claim in closed staging without creating an app account or session', async () => {
+  const flow = await beginLogin({}, false, 'EMAIL_LOCAL_PART', true);
+  try {
+    const callback = await flow.callback();
+    expect(callback.status).toBe(200);
+    const page = await callback.text();
+    expect(page).toContain('학교 계정 확인 성공');
+    expect(page).toContain('staging API는 계속 닫혀 있습니다');
+    expect(page).not.toContain(flow.tokenClaims.email as string);
+    expect(await env.DB.prepare('SELECT id FROM users WHERE google_sub=?').bind(flow.tokenClaims.sub).first()).toBeNull();
+    expect(await env.DB.prepare(`SELECT s.token_hash FROM sessions s JOIN users u ON u.id=s.user_id WHERE u.google_sub=?`)
+      .bind(flow.tokenClaims.sub).first()).toBeNull();
+    expect(await env.DB.prepare(`SELECT v.id FROM student_verifications v JOIN users u ON u.id=v.user_id WHERE u.google_sub=?`)
+      .bind(flow.tokenClaims.sub).first()).toBeNull();
+    expect(await env.DB.prepare('SELECT state_hash FROM oauth_states WHERE state_hash=?').bind(await sha256(flow.state)).first()).toBeNull();
+    expect((await flow.request('/api/v1/health')).status).toBe(503);
+    expect((await flow.request('/api/v1/auth/dev', { method: 'POST' })).status).toBe(503);
   } finally {
     flow.close();
   }

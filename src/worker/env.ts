@@ -17,6 +17,7 @@ export const environmentSchema = z.object({
   APP_ORIGIN: z.url(),
   SCHOOL_CONFIG_READY: z.enum(['true', 'false']),
   ALLOW_DEV_AUTH: z.enum(['true', 'false']),
+  STAGING_AUTH_TEST_ONLY: z.enum(['true', 'false']).optional(),
   SCHOOL_ID: z.string().optional(),
   CAMPUS_ID: z.string().optional(),
   ALLOWED_EMAIL_DOMAINS: z.string().optional(),
@@ -42,6 +43,9 @@ export const environmentSchema = z.object({
   const origin = new URL(value.APP_ORIGIN);
   if (origin.origin !== value.APP_ORIGIN || origin.username || origin.password) {
     context.addIssue({ code: 'custom', message: 'APP_ORIGIN must be an exact origin' });
+  }
+  if (value.STAGING_AUTH_TEST_ONLY === 'true' && value.APP_ENV !== 'staging') {
+    context.addIssue({ code: 'custom', message: 'Auth-only mode is staging-only' });
   }
   for (const [versionKey, urlKey] of [
     ['POLICY_TERMS_VERSION', 'POLICY_TERMS_URL'],
@@ -73,6 +77,24 @@ export const environmentSchema = z.object({
     || ['.invalid', '.example', '.test', '.localhost', '.local'].some((suffix) => origin.hostname.endsWith(suffix))) {
     context.addIssue({ code: 'custom', message: 'Remote origin must be an HTTPS domain' });
   }
+  if (Object.values(value).some((entry) => typeof entry === 'string' && /^(synthetic|replace|test|demo|your-|placeholder|example)/i.test(entry))) {
+    context.addIssue({ code: 'custom', message: 'Placeholder configuration cannot enable a remote environment' });
+  }
+  if (value.STAGING_AUTH_TEST_ONLY === 'true') {
+    if (value.APP_ENV !== 'staging' || value.SCHOOL_CONFIG_READY !== 'false'
+      || value.SCHOOL_ID !== 'gachon-university' || value.CAMPUS_ID !== 'gachon-global-campus'
+      || value.ALLOW_DEV_AUTH !== 'false' || value.STUDENT_VERIFICATION_MODE !== 'SCHOOL_ASSERTION'
+      || value.ALLOWED_EMAIL_DOMAINS?.trim().toLowerCase() !== 'gachon.ac.kr'
+      || value.ALLOWED_HOSTED_DOMAINS?.trim().toLowerCase() !== 'gachon.ac.kr'
+      || !value.GOOGLE_CLIENT_ID || !value.GOOGLE_CLIENT_SECRET || !value.CSRF_HMAC_KEY
+      || (value.CSRF_HMAC_KEY?.length ?? 0) < 32) {
+      context.addIssue({ code: 'custom', message: 'Auth-only staging requires the exact closed Gachon Google configuration' });
+    }
+    if (value.GOOGLE_CLIENT_ID && !value.GOOGLE_CLIENT_ID.endsWith('.apps.googleusercontent.com')) {
+      context.addIssue({ code: 'custom', message: 'GOOGLE_CLIENT_ID is not a Google web client ID' });
+    }
+    return;
+  }
   if (value.SCHOOL_CONFIG_READY !== 'true') context.addIssue({ code: 'custom', message: 'School configuration is not ready' });
   for (const [key, entry] of Object.entries({
     SCHOOL_ID: value.SCHOOL_ID,
@@ -82,10 +104,6 @@ export const environmentSchema = z.object({
     CSRF_HMAC_KEY: value.CSRF_HMAC_KEY,
     BOARDING_HMAC_KEY: value.BOARDING_HMAC_KEY,
     STUDENT_VERIFICATION_MODE: value.STUDENT_VERIFICATION_MODE,
-    DEPARTMENT_SOURCE_FIELD: value.DEPARTMENT_SOURCE_FIELD,
-    DEPARTMENT_TEMPLATE: value.DEPARTMENT_TEMPLATE,
-    DEPARTMENT_PARSER_VERSION: value.DEPARTMENT_PARSER_VERSION,
-    DEPARTMENT_ALIASES_JSON: value.DEPARTMENT_ALIASES_JSON,
     POLICY_TERMS_VERSION: value.POLICY_TERMS_VERSION,
     POLICY_TERMS_URL: value.POLICY_TERMS_URL,
     POLICY_PRIVACY_VERSION: value.POLICY_PRIVACY_VERSION,
@@ -118,9 +136,6 @@ export const environmentSchema = z.object({
   if (value.GOOGLE_CLIENT_ID && !value.GOOGLE_CLIENT_ID.endsWith('.apps.googleusercontent.com')) {
     context.addIssue({ code: 'custom', message: 'GOOGLE_CLIENT_ID is not a Google web client ID' });
   }
-  if (Object.values(value).some((entry) => typeof entry === 'string' && /^(synthetic|replace|test|demo|your-|placeholder|example)/i.test(entry))) {
-    context.addIssue({ code: 'custom', message: 'Placeholder configuration cannot enable a remote environment' });
-  }
   if (value.STUDENT_VERIFICATION_MODE !== 'SCHOOL_ASSERTION') {
     context.addIssue({ code: 'custom', message: 'Remote student access must use the verified school Google account' });
   }
@@ -130,11 +145,16 @@ export const environmentSchema = z.object({
     || template.replace('{department}', '').replaceAll('{id}', '').replaceAll('{*}', '').includes('{'))) {
     context.addIssue({ code: 'custom', message: 'DEPARTMENT_TEMPLATE must have a department placeholder and a simple delimiter' });
   }
-  try {
-    const aliases = JSON.parse(value.DEPARTMENT_ALIASES_JSON ?? '');
-    if (!aliases || Array.isArray(aliases) || typeof aliases !== 'object' || Object.values(aliases).some((item) => typeof item !== 'string')) throw new Error();
-  } catch {
-    context.addIssue({ code: 'custom', message: 'DEPARTMENT_ALIASES_JSON must map aliases to department codes' });
+  if (value.DEPARTMENT_SOURCE_FIELD || value.DEPARTMENT_TEMPLATE || value.DEPARTMENT_PARSER_VERSION || value.DEPARTMENT_ALIASES_JSON) {
+    if (!value.DEPARTMENT_SOURCE_FIELD || !value.DEPARTMENT_TEMPLATE || !value.DEPARTMENT_PARSER_VERSION || !value.DEPARTMENT_ALIASES_JSON) {
+      context.addIssue({ code: 'custom', message: 'Department parser settings must be configured together' });
+    }
+    try {
+      const aliases = JSON.parse(value.DEPARTMENT_ALIASES_JSON ?? '');
+      if (!aliases || Array.isArray(aliases) || typeof aliases !== 'object' || Object.values(aliases).some((item) => typeof item !== 'string')) throw new Error();
+    } catch {
+      context.addIssue({ code: 'custom', message: 'DEPARTMENT_ALIASES_JSON must map aliases to department codes' });
+    }
   }
 });
 

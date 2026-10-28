@@ -9,7 +9,7 @@ import { createSession, csrfToken, getSession, sha256, verifyMutation, clearSess
 import { authorizationUrl, consumeAuthorizationResponse, isGoogleConfigured, validReturnPath } from './auth/google';
 import { consentSchema, devLoginSchema, driverProfileDecisionSchema, driverProfileSchema, profileUpdateSchema, verificationDecisionSchema } from '../shared/auth';
 import { adminRouteCreateSchema, adminRouteUpdateSchema, adminStopSchema } from '../shared/admin';
-import { locationUploadSchema } from '../shared/location';
+import { locationDisclosureAckSchema, locationUploadSchema } from '../shared/location';
 import { blockCreateSchema, reportCreateSchema, reportDecisionSchema, suspendUserSchema } from '../shared/moderation';
 import { boardingCodeInputSchema, lifecycleCommandSchema, rideRequestCreateSchema, tripCreateSchema, tripSearchCursorSchema, tripSearchQuerySchema } from '../shared/trips';
 import { genderGroupAllows, type MatchMember } from './matching/eligibility';
@@ -279,6 +279,10 @@ app.use('*', async (c, next) => {
   if (!environmentSchema.safeParse(c.env).success) {
     return c.json({ error: { code: 'SERVICE_TEMPORARILY_UNAVAILABLE', message: '서비스 설정을 확인 중입니다.' }, meta: { requestId: c.get('requestId') } }, 503);
   }
+  if (c.env.STAGING_AUTH_TEST_ONLY === 'true'
+    && !(c.req.method === 'GET' && ['/api/v1/auth/google/start', '/api/v1/auth/google/callback'].includes(c.req.path))) {
+    return c.json({ error: { code: 'SERVICE_TEMPORARILY_UNAVAILABLE', message: '학교 계정 로그인 검증 전용 staging입니다.' }, meta: { requestId: c.get('requestId') } }, 503);
+  }
   await next();
 });
 app.use('/api/*', bodyLimit({
@@ -311,7 +315,7 @@ app.post('/api/v1/auth/dev', async (c) => {
 });
 
 app.get('/api/v1/auth/google/start', async (c) => {
-  if (!isGoogleConfigured(c.env) || !c.env.GOOGLE_CLIENT_ID || c.env.SCHOOL_CONFIG_READY !== 'true') {
+  if (!isGoogleConfigured(c.env) || !c.env.GOOGLE_CLIENT_ID) {
     return c.json({ error: { code: 'AUTH_PROVIDER_UNAVAILABLE', message: '학교 로그인 설정이 아직 준비되지 않았습니다.' }, meta: { requestId: c.get('requestId') } }, 503);
   }
   try {
@@ -336,6 +340,11 @@ app.get('/api/v1/auth/google/callback', async (c) => {
   }
   try {
     const claims = await consumeAuthorizationResponse(c.env, c.env.DB, new URL(c.req.url), state, browserBinding);
+    if (c.env.STAGING_AUTH_TEST_ONLY === 'true') {
+      await c.env.DB.prepare('DELETE FROM oauth_states WHERE state_hash=?').bind(await sha256(state)).run();
+      clearBrowserBinding();
+      return c.html(`<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>학교 계정 확인</title><main><h1>학교 계정 확인 성공</h1><p>Google이 확인한 이메일 도메인과 Workspace 도메인이 모두 gachon.ac.kr과 일치합니다.</p><p>검증 전용 로그인입니다. 계정·세션·학생 확인 기록은 만들지 않았고 staging API는 계속 닫혀 있습니다.</p><a href="/">로그인 화면으로 돌아가기</a></main></html>`);
+    }
     const conflict = await c.env.DB.prepare('SELECT id FROM users WHERE email=? AND google_sub<>?').bind(claims.email, claims.subject).first();
     if (conflict) throw new Error('ACCOUNT_EMAIL_CONFLICT');
     const existing = await c.env.DB.prepare('SELECT id,school_id AS schoolId,campus_id AS campusId,account_status AS accountStatus FROM users WHERE google_sub=?')
@@ -367,6 +376,10 @@ app.get('/api/v1/auth/google/callback', async (c) => {
     return c.redirect(validReturnPath(claims.returnPath, c.env.APP_ORIGIN), 302);
   } catch {
     clearBrowserBinding();
+    if (c.env.STAGING_AUTH_TEST_ONLY === 'true') {
+      await c.env.DB.prepare('DELETE FROM oauth_states WHERE state_hash=?').bind(await sha256(state)).run().catch(() => undefined);
+      return c.html(`<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>학교 계정 확인 실패</title><main><h1>학교 계정을 확인하지 못했습니다</h1><p>이메일 도메인과 Google Workspace 도메인이 gachon.ac.kr인 학교 Google 계정으로 다시 시도해 주세요. 계정이나 세션은 만들지 않았습니다.</p><a href="/api/v1/auth/google/start">다시 로그인</a></main></html>`, 401);
+    }
     return c.json({ error: { code: 'INVALID_OAUTH_RESPONSE', message: '학교 계정을 확인하지 못했습니다. 다시 시도해 주세요.' }, meta: { requestId: c.get('requestId') } }, 401);
   }
 });
@@ -461,33 +474,77 @@ app.get('/api/v1/locations/me', async (c) => {
     || (result.session.verifiedUntil ?? 0) <= now) {
     return c.json({ error: { code: 'STUDENT_VERIFICATION_REQUIRED', message: '유효한 학생 확인이 필요합니다.' }, meta: { requestId: c.get('requestId') } }, 403);
   }
-  if (!await hasLocationConsents(c.env.DB, c.env, result.session.userId)) {
-    return c.json({ error: { code: 'LOCATION_CONSENT_REQUIRED', message: '위치 수집과 상대 제공에 동의해 주세요.' }, meta: { requestId: c.get('requestId') } }, 403);
+  const locationConsented = await hasLocationConsents(c.env.DB, c.env, result.session.userId);
+  const context = locationConsented ? await currentLocationContext(c.env.DB, c.env, result.session.userId, now) : null;
+  let location: { sequence: number; lat: number; lng: number; accuracyM: number; capturedAt: number; receivedAt: number; expiresAt: number } | null = null;
+  if (context) {
+    if (!await rateLimit(c.env.DB, result.session.userId, 'LOCATION_OWNER_READ', now, 20, 60_000)) {
+      return c.json({ error: { code: 'RATE_LIMITED', message: '위치 조회가 너무 잦습니다. 잠시 후 다시 시도해 주세요.' }, meta: { requestId: c.get('requestId') } }, 429);
+    }
+    location = await c.env.DB.prepare(`SELECT sequence,lat,lng,accuracy_m AS accuracyM,captured_at AS capturedAt,
+        received_at AS receivedAt,expires_at AS expiresAt
+      FROM latest_locations WHERE user_id=? AND trip_id=? AND request_id IS ?`)
+      .bind(result.session.userId, context.tripId, context.requestId).first();
+  } else {
+    await c.env.DB.prepare('DELETE FROM location_notice_presence WHERE user_id=?').bind(result.session.userId).run();
   }
-  const context = await currentLocationContext(c.env.DB, c.env, result.session.userId, now);
-  if (!context) return c.json({ error: { code: 'LOCATION_NOT_AVAILABLE', message: '수락된 운행에서만 위치를 확인할 수 있습니다.' }, meta: { requestId: c.get('requestId') } }, 409);
-  const location = await c.env.DB.prepare(`SELECT sequence,lat,lng,accuracy_m AS accuracyM,captured_at AS capturedAt,
-      received_at AS receivedAt,expires_at AS expiresAt
-    FROM latest_locations WHERE user_id=? AND trip_id=? AND request_id IS ?`)
-    .bind(result.session.userId, context.tripId, context.requestId).first<{
-      sequence: number; lat: number; lng: number; accuracyM: number; capturedAt: number; receivedAt: number; expiresAt: number;
-    }>();
   const disclosures = await c.env.DB.prepare(`SELECT id,recipient_nickname AS recipientNickname,
-      recipient_role AS recipientRole,purpose,provided_at AS providedAt
-    FROM location_disclosure_records WHERE owner_user_id=? AND trip_id=? AND request_id IS ?
+      recipient_role AS recipientRole,purpose,requested_at AS requestedAt,position_delivered_at AS providedAt,
+      notice_acknowledged_at AS noticeAcknowledgedAt,post_notice_acknowledged_at AS postNoticeAcknowledgedAt
+    FROM location_disclosure_records WHERE owner_user_id=?
     ORDER BY provided_at DESC,id DESC LIMIT 20`)
-    .bind(result.session.userId, context.tripId, context.requestId).all<{
-      id: string; recipientNickname: string; recipientRole: 'DRIVER' | 'RIDER'; purpose: 'MEETING'; providedAt: number;
+    .bind(result.session.userId).all<{
+      id: string; recipientNickname: string; recipientRole: 'DRIVER' | 'RIDER'; purpose: 'MEETING';
+      requestedAt: number; providedAt: number | null; noticeAcknowledgedAt: number | null; postNoticeAcknowledgedAt: number | null;
     }>();
-  const fresh = location && location.expiresAt > now;
+  if (context) {
+    try {
+      await c.env.DB.batch([
+        c.env.DB.prepare(`INSERT INTO location_notice_presence (user_id,trip_id,request_id,last_seen_at,expires_at)
+          VALUES(?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET trip_id=excluded.trip_id,
+            request_id=excluded.request_id,last_seen_at=excluded.last_seen_at,expires_at=excluded.expires_at`)
+          .bind(result.session.userId, context.tripId, context.requestId, now, now + 15_000),
+        c.env.DB.prepare(`INSERT INTO location_access_records
+          (id,user_id,location_owner_user_id,action,trip_id,request_id,accessed_at)
+          VALUES(?,?,?,'OWNER_READ',?,?,?)`)
+          .bind(crypto.randomUUID(), result.session.userId, result.session.userId, context.tripId, context.requestId, now),
+      ]);
+    } catch {
+      return c.json({ error: { code: 'SERVICE_TEMPORARILY_UNAVAILABLE', message: '위치 확인 내역을 저장하지 못했습니다.' }, meta: { requestId: c.get('requestId') } }, 503);
+    }
+  }
+  const freshLocation = location && location.expiresAt > now ? location : null;
   return c.json({ data: {
     sequence: location?.sequence ?? 0,
     disclosures: disclosures.results,
-    location: fresh ? {
-      lat: location.lat, lng: location.lng, accuracyM: location.accuracyM,
-      capturedAt: location.capturedAt, receivedAt: location.receivedAt, expiresAt: location.expiresAt,
+    location: freshLocation ? {
+      lat: freshLocation.lat, lng: freshLocation.lng, accuracyM: freshLocation.accuracyM,
+      capturedAt: freshLocation.capturedAt, receivedAt: freshLocation.receivedAt, expiresAt: freshLocation.expiresAt,
     } : null,
   }, meta: { requestId: c.get('requestId') } }, { headers: { 'Cache-Control': 'no-store' } });
+});
+
+app.post('/api/v1/locations/me/disclosures/ack', async (c) => {
+  const result = await getSession(c);
+  if (!result) return c.json({ error: { code: 'UNAUTHENTICATED', message: '로그인이 필요합니다.' }, meta: { requestId: c.get('requestId') } }, 401);
+  if (!await verifyMutation(c, result.token, result.session)) {
+    return c.json({ error: { code: 'CSRF_FAILED', message: '요청을 확인할 수 없습니다.' }, meta: { requestId: c.get('requestId') } }, 403);
+  }
+  const input = locationDisclosureAckSchema.safeParse(await c.req.json().catch(() => null));
+  if (!input.success) return c.json({ error: { code: 'VALIDATION_ERROR', message: '위치 제공 알림을 확인해 주세요.' }, meta: { requestId: c.get('requestId') } }, 400);
+  const placeholders = input.data.disclosureIds.map(() => '?').join(',');
+  const acknowledgedAt = Date.now();
+  const delivered = await c.env.DB.prepare(`UPDATE location_disclosure_records
+      SET notice_acknowledged_at=CASE WHEN position_delivered_at IS NULL THEN COALESCE(notice_acknowledged_at,?) ELSE notice_acknowledged_at END,
+        post_notice_acknowledged_at=CASE WHEN position_delivered_at IS NOT NULL
+          THEN COALESCE(post_notice_acknowledged_at,?) ELSE post_notice_acknowledged_at END
+    WHERE owner_user_id=? AND id IN (${placeholders}) AND
+      ((position_delivered_at IS NULL AND notice_acknowledged_at IS NULL)
+        OR (position_delivered_at IS NOT NULL AND post_notice_acknowledged_at IS NULL))
+    RETURNING id`)
+    .bind(acknowledgedAt, acknowledgedAt, result.session.userId, ...input.data.disclosureIds).all<{ id: string }>();
+  return c.json({ data: { acknowledgedAt, disclosureIds: delivered.results.map(({ id }) => id) }, meta: { requestId: c.get('requestId') } },
+    { headers: { 'Cache-Control': 'no-store' } });
 });
 
 app.put('/api/v1/locations/me', async (c) => {
@@ -509,6 +566,14 @@ app.put('/api/v1/locations/me', async (c) => {
   }
   if (!await rateLimit(c.env.DB, result.session.userId, 'LOCATION_UPDATE', now, 10, 60_000)) {
     return c.json({ error: { code: 'RATE_LIMITED', message: '위치 갱신이 너무 잦습니다. 잠시 후 다시 시도해 주세요.' }, meta: { requestId: c.get('requestId') } }, 429);
+  }
+  try {
+    await c.env.DB.prepare(`INSERT INTO location_access_records
+      (id,user_id,location_owner_user_id,action,trip_id,request_id,accessed_at)
+      VALUES(?,?,?,'UPLOAD',?,?,?)`)
+      .bind(crypto.randomUUID(), result.session.userId, result.session.userId, context.tripId, context.requestId, now).run();
+  } catch {
+    return c.json({ error: { code: 'SERVICE_TEMPORARILY_UNAVAILABLE', message: '위치 처리 내역을 저장하지 못했습니다.' }, meta: { requestId: c.get('requestId') } }, 503);
   }
   const consentedUsers = `WITH consented_users AS (${CONSENTED_USERS_SQL}), valid_activity AS (`;
   const validActivity = context.role === 'DRIVER' ? `SELECT own.user_id,t.id AS tripId
@@ -592,9 +657,12 @@ app.get('/api/v1/trips/:tripId/locations', async (c) => {
   if (!context || context.tripId !== tripId.data) {
     return c.json({ error: { code: 'NOT_FOUND', message: '요청한 자료가 없습니다.' }, meta: { requestId: c.get('requestId') } }, 404);
   }
+  if (!await rateLimit(c.env.DB, result.session.userId, 'LOCATION_PEER_READ', now, 20, 60_000)) {
+    return c.json({ error: { code: 'RATE_LIMITED', message: '위치 조회가 너무 잦습니다. 잠시 후 다시 시도해 주세요.' }, meta: { requestId: c.get('requestId') } }, 429);
+  }
   const versions = consentVersions(c.env);
   const targetSql = context.role === 'DRIVER' ? `WITH consented_users AS (${CONSENTED_USERS_SQL})
-    SELECT l.user_id AS ownerUserId,rider.nickname AS nickname,'RIDER' AS role,l.lat,l.lng,l.accuracy_m AS accuracyM,
+    SELECT l.user_id AS ownerUserId,rr.id AS locationKey,rider.nickname AS nickname,'RIDER' AS role,l.lat,l.lng,l.accuracy_m AS accuracyM,
       l.captured_at AS capturedAt,l.received_at AS receivedAt,l.expires_at AS expiresAt,l.sequence
     FROM trips t JOIN users driver ON driver.id=t.driver_id
     JOIN driver_profiles p ON p.user_id=driver.id JOIN active_user_locks ownerLock
@@ -604,23 +672,27 @@ app.get('/api/v1/trips/:tripId/locations', async (c) => {
     JOIN users rider ON rider.id=rr.rider_id JOIN active_user_locks riderLock
       ON riderLock.user_id=rider.id AND riderLock.role='RIDER' AND riderLock.request_id=rr.id
     JOIN consented_users riderConsent ON riderConsent.user_id=rider.id
+    JOIN location_notice_presence ownerPresence ON ownerPresence.user_id=rider.id
+      AND ownerPresence.trip_id=t.id AND ownerPresence.request_id=rr.id
     JOIN latest_locations l ON l.user_id=rider.id AND l.trip_id=t.id AND l.request_id=rr.id
-      AND l.expires_at>? AND l.received_at>?
+      AND l.expires_at>? AND l.received_at>? AND ownerPresence.expires_at>?
     WHERE t.id=? AND t.driver_id=? AND t.status='OPEN' AND t.expires_at>?
       AND driver.role='STUDENT' AND driver.account_status='ACTIVE' AND driver.affiliation_status='VERIFIED' AND driver.verified_until>?
       AND p.verification_status='VERIFIED' AND p.verified_until>?
       AND rider.role='STUDENT' AND rider.account_status='ACTIVE' AND rider.affiliation_status='VERIFIED' AND rider.verified_until>?
       AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE
         (b.blocker_id=driver.id AND b.blocked_id=rider.id) OR (b.blocker_id=rider.id AND b.blocked_id=driver.id))` : `WITH consented_users AS (${CONSENTED_USERS_SQL})
-    SELECT l.user_id AS ownerUserId,driver.nickname AS nickname,'DRIVER' AS role,l.lat,l.lng,l.accuracy_m AS accuracyM,
+    SELECT l.user_id AS ownerUserId,'driver' AS locationKey,driver.nickname AS nickname,'DRIVER' AS role,l.lat,l.lng,l.accuracy_m AS accuracyM,
       l.captured_at AS capturedAt,l.received_at AS receivedAt,l.expires_at AS expiresAt,l.sequence
     FROM ride_requests rr JOIN trips t ON t.id=rr.trip_id JOIN users driver ON driver.id=t.driver_id
     JOIN driver_profiles p ON p.user_id=driver.id JOIN users rider ON rider.id=rr.rider_id
     JOIN active_user_locks riderLock ON riderLock.user_id=rider.id AND riderLock.role='RIDER' AND riderLock.request_id=rr.id
     JOIN active_user_locks driverLock ON driverLock.user_id=driver.id AND driverLock.role='DRIVER' AND driverLock.trip_id=t.id
     JOIN consented_users riderConsent ON riderConsent.user_id=rider.id JOIN consented_users driverConsent ON driverConsent.user_id=driver.id
+    JOIN location_notice_presence ownerPresence ON ownerPresence.user_id=driver.id
+      AND ownerPresence.trip_id=t.id AND ownerPresence.request_id IS NULL
     JOIN latest_locations l ON l.user_id=driver.id AND l.trip_id=t.id AND l.request_id IS NULL
-      AND l.expires_at>? AND l.received_at>?
+      AND l.expires_at>? AND l.received_at>? AND ownerPresence.expires_at>?
     WHERE rr.id=? AND rr.trip_id=? AND rr.rider_id=? AND rr.status IN ('ACCEPTED','BOARDED') AND t.status='OPEN' AND t.expires_at>?
       AND rider.role='STUDENT' AND rider.account_status='ACTIVE' AND rider.affiliation_status='VERIFIED' AND rider.verified_until>?
       AND driver.role='STUDENT' AND driver.account_status='ACTIVE' AND driver.affiliation_status='VERIFIED' AND driver.verified_until>?
@@ -628,26 +700,50 @@ app.get('/api/v1/trips/:tripId/locations', async (c) => {
       AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE
         (b.blocker_id=driver.id AND b.blocked_id=rider.id) OR (b.blocker_id=rider.id AND b.blocked_id=driver.id))`;
   const locationBindings = context.role === 'DRIVER'
-    ? [...versions, now, now - 60_000, context.tripId, result.session.userId, now, now, now, now]
-    : [...versions, now, now - 60_000, context.requestId, context.tripId, result.session.userId, now, now, now, now];
+    ? [...versions, now, now - 60_000, now, context.tripId, result.session.userId, now, now, now, now]
+    : [...versions, now, now - 60_000, now, context.requestId, context.tripId, result.session.userId, now, now, now, now];
   const locations = await c.env.DB.prepare(targetSql).bind(...locationBindings).all<{
-    ownerUserId: string; nickname: string; role: 'DRIVER' | 'RIDER'; lat: number; lng: number; accuracyM: number;
+    ownerUserId: string; locationKey: string; nickname: string; role: 'DRIVER' | 'RIDER'; lat: number; lng: number; accuracyM: number;
     capturedAt: number; receivedAt: number; expiresAt: number; sequence: number;
   }>();
-  if (locations.results.length) {
-    const providedAt = Date.now();
-    // shortcut: unchanged location sequences are recorded once per recipient; log every response if legal review requires it.
-    await c.env.DB.batch(locations.results.map((location) => c.env.DB.prepare(`INSERT OR IGNORE INTO location_disclosure_records
-      (id,owner_user_id,recipient_user_id,recipient_nickname,recipient_role,trip_id,request_id,sequence,purpose,provided_at)
-      VALUES(?,?,?,?,?,?,?,?, 'MEETING',?)`)
+  try {
+    const reads = locations.results.length ? locations.results.map((location) =>
+      c.env.DB.prepare(`INSERT INTO location_access_records
+        (id,user_id,location_owner_user_id,action,trip_id,request_id,accessed_at)
+        VALUES(?,?,?,'PEER_READ',?,?,?)`)
+        .bind(crypto.randomUUID(), result.session.userId, location.ownerUserId, context.tripId, context.requestId, now))
+      : [c.env.DB.prepare(`INSERT INTO location_access_records
+        (id,user_id,location_owner_user_id,action,trip_id,request_id,accessed_at)
+        VALUES(?,?,NULL,'PEER_READ',?,?,?)`)
+        .bind(crypto.randomUUID(), result.session.userId, context.tripId, context.requestId, now)];
+    await c.env.DB.batch(reads);
+  } catch {
+    return c.json({ error: { code: 'SERVICE_TEMPORARILY_UNAVAILABLE', message: '위치 처리 내역을 저장하지 못했습니다.' }, meta: { requestId: c.get('requestId') } }, 503);
+  }
+  const deliveredLocations: typeof locations.results = [];
+  for (const location of locations.results) {
+    const disclosure = await c.env.DB.prepare(`INSERT OR IGNORE INTO location_disclosure_records
+      (id,owner_user_id,recipient_user_id,recipient_nickname,recipient_role,trip_id,request_id,sequence,purpose,provided_at,requested_at)
+      VALUES(?,?,?,?,?,?,?,?, 'MEETING',?,?) RETURNING id`)
       .bind(crypto.randomUUID(), location.ownerUserId, result.session.userId, result.session.nickname,
-        context.role, context.tripId, context.requestId, location.sequence, providedAt)));
+        context.role, context.tripId, context.requestId, location.sequence, now, now)
+      .first<{ id: string }>();
+    if (disclosure) continue;
+    const providedAt = Date.now();
+    const provided = await c.env.DB.prepare(`UPDATE location_disclosure_records
+        SET position_delivered_at=?,provided_at=?
+      WHERE owner_user_id=? AND recipient_user_id=? AND trip_id=? AND sequence=?
+        AND notice_acknowledged_at IS NOT NULL AND position_delivered_at IS NULL
+      RETURNING id`)
+      .bind(providedAt, providedAt, location.ownerUserId, result.session.userId, context.tripId, location.sequence)
+      .first<{ id: string }>();
+    if (provided) deliveredLocations.push(location);
   }
   return c.json({ data: {
     tripId: context.tripId, viewerRole: context.role,
     stop: { name: context.stopName, lat: context.stopLat, lng: context.stopLng },
-    locations: locations.results.map(({ nickname, role, lat, lng, accuracyM, capturedAt, receivedAt, expiresAt, sequence }) =>
-      ({ nickname, role, lat, lng, accuracyM, capturedAt, receivedAt, expiresAt, sequence })),
+    locations: deliveredLocations.map(({ locationKey, nickname, role, lat, lng, accuracyM, capturedAt, receivedAt, expiresAt, sequence }) =>
+      ({ key: locationKey, nickname, role, lat, lng, accuracyM, capturedAt, receivedAt, expiresAt, sequence })),
   }, meta: { requestId: c.get('requestId') } }, { headers: { 'Cache-Control': 'no-store' } });
 });
 
@@ -1657,7 +1753,7 @@ app.post('/api/v1/me/consents', async (c) => {
           VALUES(?,?,?,?,?)`).bind(crypto.randomUUID(), result.session.userId, input.data.kind, policy.version, now),
       ]);
     } else {
-      await c.env.DB.batch([
+      const statements = [
         c.env.DB.prepare('UPDATE consents SET revoked_at=? WHERE user_id=? AND kind=? AND revoked_at IS NULL')
           .bind(now, result.session.userId, input.data.kind),
         c.env.DB.prepare(`DELETE FROM latest_locations WHERE user_id=? OR trip_id IN (
@@ -1665,7 +1761,16 @@ app.post('/api/v1/me/consents', async (c) => {
           UNION SELECT rr.trip_id FROM active_user_locks l JOIN ride_requests rr ON rr.id=l.request_id
             WHERE l.user_id=? AND l.role='RIDER')`)
           .bind(result.session.userId, result.session.userId, result.session.userId),
-      ]);
+        ...(input.data.kind.startsWith('LOCATION_') ? [
+          c.env.DB.prepare('DELETE FROM location_disclosure_records WHERE owner_user_id=?')
+            .bind(result.session.userId),
+          c.env.DB.prepare('DELETE FROM location_access_records WHERE location_owner_user_id=?')
+            .bind(result.session.userId),
+          c.env.DB.prepare('DELETE FROM location_notice_presence WHERE user_id=?')
+            .bind(result.session.userId),
+        ] : []),
+      ];
+      await c.env.DB.batch(statements);
     }
   } catch {
     return c.json({ error: { code: 'SERVICE_TEMPORARILY_UNAVAILABLE', message: '동의 상태를 저장하지 못했습니다.' }, meta: { requestId: c.get('requestId') } }, 503);

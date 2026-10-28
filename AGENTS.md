@@ -1,8 +1,8 @@
 # 개발 에이전트 작업 규칙
 
-이 파일은 구현 저장소 루트에 적용되는 개발 지침이다. P1~P4 로컬 구현, P5 위치 공유·가상 위치도, P6 로컬 기능과 staging D1/Worker 배포가 있다. 대상 학교는 가천대학교 하나, 서비스 캠퍼스는 글로벌캠퍼스(성남), 메일 도메인은 `gachon.ac.kr`이며 학교 선택 UI는 두지 않는다. Staging D1 backend는 `production`이며 region은 APAC이고 16개 migration이 적용됐다. 운영자는 Workers Free이며 도메인 등록은 별도 결제라고 확인했다. Free D1 Time Travel은 7일이고 Workers 로그의 보존·한도는 Roadmap §8/Architecture §30에 기록했다. Google Cloud 프로젝트와 staging OAuth client를 만들고 Client ID 및 `GOOGLE_CLIENT_SECRET`을 Worker에 연결해 닫힌 staging 설정으로 배포했다. 가천대학교 Workspace 계정을 OIDC로 정상 인증하면 현재 재학생 심사 없이 이용 가능하며, 자격은 세션과 함께 최대 7일 유효하고 Google 재인증 시 갱신한다. `SCHOOL_CONFIG_READY=false`라 staging API는 계속 닫혀 있다. 실제 Workspace `hd`·지원 이메일 설정 확인·학과·승하차 지점·서비스의 데이터 보관/복구 정책·지도 공급자·위치 정책·모바일 실기기와 운영 설정은 남아 있다. 작업 전 Roadmap의 최신 완료 상태와 실제 코드를 함께 확인한다. 기존 지침과 사용자 지시의 적용 범위를 먼저 확인한다.
+이 파일은 구현 저장소 루트에 적용되는 개발 지침이다. P1~P4 로컬 구현, P5 위치 공유·가상 위치도, P6 신고/차단/탈퇴·정리와 staging 배포가 있다. 대상 학교는 가천대학교 하나, 서비스 캠퍼스는 글로벌캠퍼스(성남), 메일 도메인은 `gachon.ac.kr`이며 학교 선택 UI는 두지 않는다. Staging D1은 `production` backend/APAC이며 migration 0019까지 원격 적용, 0020은 로컬에서만 검증됐다. 운영자는 Workers Free이며 도메인 등록은 별도 결제라고 확인했다. Free D1 Time Travel은 7일이다. Google Workspace claim은 사용자 계정으로 staging auth-only에서 확인했고 `SCHOOL_CONFIG_READY=false`라 일반 API는 계속 닫혀 있다. 정책 4종과 탈퇴/복구 절차에 보유기간 및 위치 제공 알림을 정했지만 실제 운영자 문의처, 위치정보 법 적용 여부, D1 밖 삭제/철회 대조부·5년 권한대장, 복구 훈련, 지도 공급자와 모바일 실기기는 남아 있다. 작업 전 Roadmap 최신 상태와 실제 코드를 함께 확인한다.
 
-네 가지 정책 문안은 docs/policies/에 검토용 초안으로 작성했다. 새 위치 sequence가 상대에게 처음 응답된 시점의 로컬 알림/기록은 구현했지만, 동일 sequence 반복 조회 통지·통지 확인 기록·운영자 정보·보유기간 법률 검토는 미완료이므로 동의·배포에 사용하지 않는다.
+네 가지 정책 문서는 docs/policies/에 확정안으로 정리했으나 운영자 실명·연락처, 위치 사업자 분류와 D1 백업 처리의 법적 판단이 미정이라 실제 동의·배포에 사용하지 않는다. 새 위치 sequence는 소유자에게 상대/요청시각/목적을 안내하고 이용자가 확인 버튼을 눌러 서버가 기록하기 전에는 좌표를 반환하지 않는다. 실제 제공시각은 서버가 쓰고, 제공 후 안내 확인은 별도 버튼으로 기록한다. 앱은 확인값을 자동으로 남기지 않는다. 위치 동의 철회/탈퇴 때 본인 위치 제공 확인자료와 owner별 접근기록을 온라인 DB에서 지운다. D1 7일 복구 사본의 위치자료 처리 검토·외부 삭제/철회 대조부·권한대장·복구 훈련 전까지 일반 API는 닫는다.
 
 ## 1. 읽는 순서와 작업 원칙
 

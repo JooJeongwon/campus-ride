@@ -57,6 +57,10 @@ async function grantConsents(session: Session, location = false) {
 }
 
 async function cleanup(users: string[], tripIds: string[], requestIds: string[]) {
+  await env.DB.prepare('DELETE FROM location_access_records WHERE user_id IN (' + users.map(() => '?').join(',') + ') OR location_owner_user_id IN (' + users.map(() => '?').join(',') + ')')
+    .bind(...users, ...users).run();
+  await env.DB.prepare('DELETE FROM location_notice_presence WHERE user_id IN (' + users.map(() => '?').join(',') + ')')
+    .bind(...users).run();
   await env.DB.prepare('DELETE FROM audit_events WHERE actor_id IN (' + users.map(() => '?').join(',') + ') OR resource_id IN (' + [...users, ...tripIds, ...requestIds].map(() => '?').join(',') + ')')
     .bind(...users, ...users, ...tripIds, ...requestIds).run();
   await env.DB.prepare('DELETE FROM idempotency_keys WHERE user_id IN (' + users.map(() => '?').join(',') + ')').bind(...users).run();

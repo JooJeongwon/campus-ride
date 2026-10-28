@@ -49,6 +49,9 @@ it('shares only fresh locations inside a mutually consented accepted trip', asyn
     FROM users WHERE id=?`).bind(pendingId).first<{ affiliationStatus: string; verifiedUntil: number | null }>();
   expect(originalTrip).not.toBeNull();
   await env.DB.batch([
+    env.DB.prepare('DELETE FROM location_notice_presence WHERE user_id IN (?,?,?)').bind(driverId, riderId, pendingId),
+    env.DB.prepare('DELETE FROM location_disclosure_records WHERE trip_id=?').bind(tripId),
+    env.DB.prepare('DELETE FROM location_access_records WHERE user_id IN (?,?,?)').bind(driverId, riderId, pendingId),
     env.DB.prepare('DELETE FROM latest_locations WHERE trip_id=?').bind(tripId),
     env.DB.prepare('DELETE FROM active_user_locks WHERE user_id IN (?,?,?)').bind(driverId, riderId, pendingId),
     env.DB.prepare('DELETE FROM ride_requests WHERE trip_id=?').bind(tripId),
@@ -115,12 +118,68 @@ it('shares only fresh locations inside a mutually consented accepted trip', asyn
     const own = await request('/api/v1/locations/me', { cookie: rider.cookie });
     expect(own.headers.get('Cache-Control')).toBe('no-store');
     expect(await own.json()).toMatchObject({ data: { sequence: 1, location: { lat: 37.51 } } });
+    await env.DB.prepare('UPDATE location_notice_presence SET expires_at=? WHERE user_id=?')
+      .bind(Date.now(), driverId).run();
+    const providerOffline = await request(`/api/v1/trips/${createdTripId}/locations`, { cookie: rider.cookie });
+    expect((await providerOffline.json() as { data: { locations: unknown[] } }).data.locations).toEqual([]);
+    expect((await request('/api/v1/locations/me', { cookie: driver.cookie })).status).toBe(200);
+    expect((await request('/api/v1/locations/me', { cookie: pending.cookie })).status).toBe(200);
     const asDriver = await request(`/api/v1/trips/${createdTripId}/locations`, { cookie: driver.cookie });
     const driverData = (await asDriver.json() as { data: { stop: { name: string }; locations: Array<{ role: string; lat: number }> } }).data;
     expect(asDriver.headers.get('Cache-Control')).toBe('no-store');
     expect(driverData.stop.name).toBe('가상 교문');
-    expect(driverData.locations).toHaveLength(2);
-    expect(driverData.locations.map((point) => point.role)).toEqual(['RIDER', 'RIDER']);
+    expect(driverData.locations).toEqual([]);
+    const riderHistory = await request('/api/v1/locations/me', { cookie: rider.cookie });
+    const riderDisclosures = (await riderHistory.json() as { data: { disclosures: Array<{
+      id: string; recipientNickname: string; recipientRole: string; purpose: string; requestedAt: number;
+      providedAt: number | null; noticeAcknowledgedAt: number | null; postNoticeAcknowledgedAt: number | null;
+    }> } }).data.disclosures;
+    expect(riderDisclosures).toEqual([expect.objectContaining({
+      recipientNickname: '가상 운전자', recipientRole: 'DRIVER', purpose: 'MEETING',
+      providedAt: null, noticeAcknowledgedAt: null, postNoticeAcknowledgedAt: null,
+    })]);
+    const noCsrfAck = await request('/api/v1/locations/me/disclosures/ack', {
+      method: 'POST', cookie: rider.cookie, body: { disclosureIds: [riderDisclosures[0].id] },
+    });
+    expect(noCsrfAck.status).toBe(403);
+    const ack = await request('/api/v1/locations/me/disclosures/ack', {
+      method: 'POST', ...rider, body: { disclosureIds: [riderDisclosures[0].id] },
+    });
+    expect(ack.status).toBe(200);
+    expect((await ack.json() as { data: { disclosureIds: string[] } }).data.disclosureIds).toEqual([riderDisclosures[0].id]);
+    const pendingRequestHistory = await request('/api/v1/locations/me', { cookie: pending.cookie });
+    const pendingDisclosures = (await pendingRequestHistory.json() as { data: { disclosures: Array<{ id: string; providedAt: number | null }> } }).data.disclosures;
+    expect(pendingDisclosures).toHaveLength(1);
+    expect(pendingDisclosures[0].providedAt).toBeNull();
+    expect((await request('/api/v1/locations/me/disclosures/ack', {
+      method: 'POST', ...pending, body: { disclosureIds: [pendingDisclosures[0].id] },
+    })).status).toBe(200);
+    const sharedToRiders = await request(`/api/v1/trips/${createdTripId}/locations`, { cookie: driver.cookie });
+    const sharedLocations = (await sharedToRiders.json() as { data: { locations: Array<{ role: string; lat: number }> } }).data.locations;
+    expect(sharedLocations).toHaveLength(2);
+    expect(sharedLocations.map((point) => point.role)).toEqual(['RIDER', 'RIDER']);
+    const repeated = await request(`/api/v1/trips/${createdTripId}/locations`, { cookie: driver.cookie });
+    expect((await repeated.json() as { data: { locations: unknown[] } }).data.locations).toEqual([]);
+    const providedHistory = await request('/api/v1/locations/me', { cookie: rider.cookie });
+    const providedDisclosure = (await providedHistory.json() as { data: { disclosures: Array<{
+      id: string; providedAt: number | null; postNoticeAcknowledgedAt: number | null;
+    }> } }).data.disclosures[0];
+    expect(providedDisclosure.providedAt).not.toBeNull();
+    expect(providedDisclosure.postNoticeAcknowledgedAt).toBeNull();
+    expect((await request('/api/v1/locations/me/disclosures/ack', {
+      method: 'POST', ...rider, body: { disclosureIds: [providedDisclosure.id] },
+    })).status).toBe(200);
+    const acknowledged = await request('/api/v1/locations/me', { cookie: rider.cookie });
+    expect((await acknowledged.json() as { data: { disclosures: Array<{ postNoticeAcknowledgedAt: number | null }> } })
+      .data.disclosures[0].postNoticeAcknowledgedAt).not.toBeNull();
+    const firstDriverLocation = await request(`/api/v1/trips/${createdTripId}/locations`, { cookie: rider.cookie });
+    expect((await firstDriverLocation.json() as { data: { locations: unknown[] } }).data.locations).toEqual([]);
+    const driverHistory = await request('/api/v1/locations/me', { cookie: driver.cookie });
+    const driverDisclosure = (await driverHistory.json() as { data: { disclosures: Array<{ id: string; providedAt: number | null }> } }).data.disclosures[0];
+    expect(driverDisclosure.providedAt).toBeNull();
+    expect((await request('/api/v1/locations/me/disclosures/ack', {
+      method: 'POST', ...driver, body: { disclosureIds: [driverDisclosure.id] },
+    })).status).toBe(200);
     const asRider = await request(`/api/v1/trips/${createdTripId}/locations`, { cookie: rider.cookie });
     expect((await asRider.json() as { data: { locations: Array<{ role: string; lat: number }> } }).data.locations)
       .toEqual([expect.objectContaining({ role: 'DRIVER', lat: 37.5 })]);
@@ -128,11 +187,25 @@ it('shares only fresh locations inside a mutually consented accepted trip', asyn
     expect(unknown.status).toBe(404);
 
     const staleAt = Date.now() - 31_000;
-    await env.DB.prepare(`UPDATE latest_locations SET received_at=?,expires_at=? WHERE user_id=?`)
+    await env.DB.prepare(`UPDATE latest_locations SET sequence=2,received_at=?,expires_at=? WHERE user_id=?`)
       .bind(staleAt, staleAt + 60_000, driverId).run();
+    const staleRequest = await request(`/api/v1/trips/${createdTripId}/locations`, { cookie: rider.cookie });
+    expect((await staleRequest.json() as { data: { locations: unknown[] } }).data.locations).toEqual([]);
+    const staleNoticeResponse = await request('/api/v1/locations/me', { cookie: driver.cookie });
+    const staleNotice = (await staleNoticeResponse.json() as { data: { disclosures: Array<{ id: string; providedAt: number | null }> } })
+      .data.disclosures.find(({ providedAt }) => providedAt === null);
+    expect(staleNotice).toBeDefined();
+    expect((await request('/api/v1/locations/me/disclosures/ack', {
+      method: 'POST', ...driver, body: { disclosureIds: [staleNotice!.id] },
+    })).status).toBe(200);
     const stale = await request(`/api/v1/trips/${createdTripId}/locations`, { cookie: rider.cookie });
-    expect((await stale.json() as { data: { locations: Array<{ receivedAt: number }> } }).data.locations[0].receivedAt)
-      .toBe(staleAt);
+    expect((await stale.json() as { data: { locations: Array<{ sequence: number; receivedAt: number }> } }).data.locations)
+      .toEqual([expect.objectContaining({ sequence: 2, receivedAt: staleAt })]);
+    const expiredAt = Date.now() - 61_000;
+    await env.DB.prepare('UPDATE latest_locations SET received_at=?,expires_at=? WHERE user_id=?')
+      .bind(expiredAt, expiredAt + 60_000, driverId).run();
+    const expired = await request(`/api/v1/trips/${createdTripId}/locations`, { cookie: rider.cookie });
+    expect((await expired.json() as { data: { locations: unknown[] } }).data.locations).toEqual([]);
 
     expect((await request(`/api/v1/requests/${firstRequestId}/cancel`, {
       method: 'POST', ...rider, key: crypto.randomUUID(),
@@ -147,8 +220,18 @@ it('shares only fresh locations inside a mutually consented accepted trip', asyn
     expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM latest_locations WHERE trip_id=?')
       .bind(createdTripId).first<{ count: number }>()).toMatchObject({ count: 0 });
     expect((await request(`/api/v1/trips/${createdTripId}/locations`, { cookie: pending.cookie })).status).toBe(403);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM location_disclosure_records WHERE owner_user_id=?')
+      .bind(pendingId).first<{ count: number }>()).toMatchObject({ count: 0 });
+    expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM location_access_records WHERE location_owner_user_id=?')
+      .bind(pendingId).first<{ count: number }>()).toMatchObject({ count: 0 });
+    const pendingHistory = await request('/api/v1/locations/me', { cookie: pending.cookie });
+    expect((await pendingHistory.json() as { data: { disclosures: Array<{ purpose: string }> } }).data.disclosures)
+      .toEqual([]);
   } finally {
     await env.DB.batch([
+      env.DB.prepare('DELETE FROM location_notice_presence WHERE user_id IN (?,?,?)').bind(driverId, riderId, pendingId),
+      env.DB.prepare('DELETE FROM location_disclosure_records WHERE trip_id=?').bind(createdTripId ?? ''),
+      env.DB.prepare('DELETE FROM location_access_records WHERE user_id IN (?,?,?)').bind(driverId, riderId, pendingId),
       env.DB.prepare('DELETE FROM latest_locations WHERE trip_id=?').bind(createdTripId ?? ''),
       env.DB.prepare('DELETE FROM active_user_locks WHERE user_id IN (?,?,?)').bind(driverId, riderId, pendingId),
       env.DB.prepare('DELETE FROM ride_requests WHERE trip_id=?').bind(createdTripId ?? ''),

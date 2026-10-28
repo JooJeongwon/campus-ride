@@ -11,3 +11,7 @@ export const locationUploadSchema = z.object({
 }).strict();
 
 export type LocationUpload = z.infer<typeof locationUploadSchema>;
+
+export const locationDisclosureAckSchema = z.object({
+  disclosureIds: z.array(z.uuid()).min(1).max(20),
+}).strict();

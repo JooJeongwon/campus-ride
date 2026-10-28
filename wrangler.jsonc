@@ -79,6 +79,12 @@
 				"APP_ORIGIN": "https://campus-ride-staging.jwjoo0512.workers.dev",
 				"SCHOOL_CONFIG_READY": "false",
 				"ALLOW_DEV_AUTH": "false",
+				"STAGING_AUTH_TEST_ONLY": "true",
+				"SCHOOL_ID": "gachon-university",
+				"CAMPUS_ID": "gachon-global-campus",
+				"ALLOWED_EMAIL_DOMAINS": "gachon.ac.kr",
+				"ALLOWED_HOSTED_DOMAINS": "gachon.ac.kr",
+				"STUDENT_VERIFICATION_MODE": "SCHOOL_ASSERTION",
 				"GOOGLE_CLIENT_ID": "944954288449-jts5t0tness3si2jsld0hd2dm9p0gesp.apps.googleusercontent.com"
 			}
 		},

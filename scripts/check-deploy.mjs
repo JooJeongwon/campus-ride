@@ -22,11 +22,14 @@ if (environment === 'production') {
     && appOrigin.hostname.startsWith(`${staging?.name}.`) && appOrigin.hostname.endsWith('.workers.dev');
   if (!validDatabase || !validOrigin || staging?.workers_dev !== true || staging?.preview_urls !== false
     || staging?.vars?.APP_ENV !== 'staging' || staging?.vars?.SCHOOL_CONFIG_READY !== 'false'
-    || staging?.vars?.ALLOW_DEV_AUTH !== 'false') {
-    console.error('staging 배포 차단: 유효한 D1 연결과 닫힌 workers.dev 설정이 필요합니다.');
+    || staging?.vars?.ALLOW_DEV_AUTH !== 'false' || staging?.vars?.STAGING_AUTH_TEST_ONLY !== 'true'
+    || staging?.vars?.SCHOOL_ID !== 'gachon-university' || staging?.vars?.CAMPUS_ID !== 'gachon-global-campus'
+    || staging?.vars?.ALLOWED_EMAIL_DOMAINS !== 'gachon.ac.kr' || staging?.vars?.ALLOWED_HOSTED_DOMAINS !== 'gachon.ac.kr'
+    || staging?.vars?.STUDENT_VERIFICATION_MODE !== 'SCHOOL_ASSERTION') {
+    console.error('staging 배포 차단: Gachon 로그인 검증 전용이며 일반 API가 닫힌 설정이어야 합니다.');
     process.exitCode = 1;
   } else {
-    const env = { ...process.env, CLOUDFLARE_ENV: 'staging' };
+    const env = { ...process.env, CLOUDFLARE_ENV: 'staging', VITE_STAGING_AUTH_TEST_ONLY: 'true' };
     const build = spawnSync('npm', ['run', 'build'], { stdio: 'inherit', env });
     if (build.status !== 0) {
       process.exitCode = build.status ?? 1;
