@@ -1,6 +1,6 @@
 # 교내 동승 매칭 웹앱 — Project
 
-문서 버전: 0.6 · 작성일: 2026-10-28 · 상태: P1~P4 구현, P5 위치 공유·가상 위치도 로컬 구현, P6 로컬 구현 및 staging D1/Worker 연결; staging Google OAuth client ID 설정, secret binding 이름 수정과 학교·정책 설정이 남아 API는 닫혀 있고 지도·실기기·보관 검증 대기
+문서 버전: 0.6 · 작성일: 2026-10-28 · 상태: P1~P4 구현, P5 위치 공유·가상 위치도 로컬 구현, P6 로컬 구현 및 staging D1/Worker 연결; Google OAuth client ID/secret 연결과 닫힌 staging 배포 완료, 학교·정책 설정이 남아 API는 닫혀 있고 지도·실기기·보관 검증 대기
 
 ## 1. 목표와 범위
 

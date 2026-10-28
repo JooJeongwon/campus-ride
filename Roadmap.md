@@ -67,7 +67,7 @@
 - [x] Google Auth Platform에 앱과 staging Web application client를 생성한다. audience는 `External`; 요청 scope는 현재 코드의 `openid email profile`만 사용한다. Support email은 동의 화면에 표시되므로 운영자가 선택한다.
 - [x] staging client의 Authorized redirect URI를 `https://campus-ride-staging.jwjoo0512.workers.dev/api/v1/auth/google/callback`으로 등록한다. 이 서버 처리 흐름은 Authorized JavaScript origins를 사용하지 않는다. Production client는 별도로 출시 전 만든다.
 - [x] Client ID를 `wrangler.jsonc`의 staging vars에 저장한다.
-- [ ] Cloudflare staging secret을 정확한 `GOOGLE_CLIENT_SECRET` 이름으로 저장한다. 현재 등록된 이름 `GOOGLE_CLIENT_SECRE`는 마지막 `T`가 빠져 Worker에서 사용되지 않는다. 기존 secret 값이 남아 있으면 올바른 이름으로 다시 저장하고, 값이 없으면 Google Console의 **Add Secret**으로 교체용 secret을 만든다. 새 secret으로 동작을 검증한 뒤 잘못된 binding과 이전 Google secret을 정리한다.
+- [x] Client Secret을 Cloudflare의 `GOOGLE_CLIENT_SECRET` secret binding으로 저장한다. 잘못된 `GOOGLE_CLIENT_SECRE` binding은 올바른 이름으로 교체했다.
 
 Google Auth Platform 콘솔: [campus-ride-gachon](https://console.cloud.google.com/auth/overview?project=campus-ride-gachon). 현재 요청 scope만 사용하면 Google의 External/Testing test-user 제한 예외가 적용되며, 앱 서버의 `gachon.ac.kr` + Workspace `hd` 검증이 실제 접근 제한이다. [Google App Audience 안내](https://support.google.com/cloud/answer/15549945?hl=en)
 - [x] Authorization Code, state·nonce·브라우저 바인딩, PKCE와 ID token claim/JWKS 서명 검증 구현. 합성 provider를 통한 Workers 회귀 통과; 실제 Google provider 시험은 대기.
@@ -81,7 +81,7 @@ Google Auth Platform 콘솔: [campus-ride-gachon](https://console.cloud.google.c
 
 **로컬 검증 결과:** `npm run test:unit` 6개, `npm run test:integration` 23개, `npm run test:e2e` 2개 통과. Workers/D1 통합은 합성 Google discovery·토큰·JWKS를 사용해 유효/위조 서명, issuer·audience·nonce·만료, email/`hd`, state 재사용·다른 브라우저, 정지/만료 계정, CSRF, 관리자 trigger, 동의 버전·철회와 학과 파서를 확인했다. `npm run lint`, `typecheck`, `build`, 로컬 migration도 통과했다.
 
-**외부 검증 대기:** 학교 계정 자체를 이용 자격으로 삼는 정책과 글로벌캠퍼스 범위는 결정됐고 로컬 코드/문서에 반영했다. Google Cloud 프로젝트 `campus-ride-gachon`은 만들었으나 Google Auth Platform 앱·사용자 지원 이메일·staging OAuth client/secret·실제 Workspace `hd` claim은 미설정/미검증이다. 학과 규칙과 실제 정책 URL·내용도 미확정이다. 실제 provider·학교 데이터·원격 staging 시험은 하지 않아 OIDC staging 동작 완료를 주장하지 않는다.
+**외부 검증 대기:** 학교 계정 자체를 이용 자격으로 삼는 정책과 글로벌캠퍼스 범위는 결정됐고 로컬 코드/문서에 반영했다. Google Cloud 프로젝트·OAuth app/client·staging Client ID/Secret을 연결해 `SCHOOL_CONFIG_READY=false`인 상태로 배포했다. 실제 Workspace `hd` claim과 콘솔의 support email 값을 확인하지 않았고, 학과 규칙·정책 URL/내용도 미확정이다. 실제 Google provider 로그인은 아직 시험하지 않았다.
 
 **완료 기준:** AC-01·AC-02를 통과하고, Gachon OIDC 인증 계정은 동의 완료 후 즉시 학생 기능을 사용할 수 있다. 학과 후보 추출과 검증된 학과가 화면/DB에서 구분된다.
 
@@ -206,7 +206,7 @@ Google Auth Platform 콘솔: [campus-ride-gachon](https://console.cloud.google.c
 
 **완료 기준:** AC-01~AC-11, 핵심 E2E와 실제 모바일 시험이 통과한다. 성능 결과에는 실제 측정 환경·표본·실패율을 남기고 임의의 처리 성능을 주장하지 않는다. staging 배포 완료와 운영 공개 완료를 구분한다.
 
-2026-10-28: staging D1/Worker 기본 인프라를 생성·연결하고 migration을 적용했다. Vite Cloudflare plugin 설정에 따라 `CLOUDFLARE_ENV=staging npm run build` 후 배포하도록 연결했으며, `workers_dev`에서 정적 화면만 공개하고 준비되지 않은 API는 503으로 차단한다. 이 단계는 실제 Google 로그인·학교 계정 통합·P7 수용 시나리오 검증을 완료한 뜻이 아니므로 위 항목은 미체크 상태다.
+2026-10-28: staging D1/Worker 기본 인프라를 생성·연결하고 migration을 적용했다. Vite Cloudflare plugin 설정에 따라 `CLOUDFLARE_ENV=staging npm run build` 후 배포하도록 연결했으며, `workers_dev`에서 정적 화면만 공개하고 준비되지 않은 API는 503으로 차단한다. OAuth client ID와 올바른 secret binding을 추가한 뒤 `npm run deploy:staging`으로 닫힌 설정을 다시 배포했다. 이 단계는 실제 Google 로그인·학교 계정 통합·P7 수용 시나리오 검증을 완료한 뜻이 아니므로 위 항목은 미체크 상태다.
 
 ## 10. P8 — 제한 파일럿과 공개 판단
 
@@ -228,4 +228,4 @@ Google Auth Platform 콘솔: [campus-ride-gachon](https://console.cloud.google.c
 
 **현재 완료:** 네 설계 문서, P1~P4 로컬 구현, P5 위치 공유 핵심 흐름과 가상 위치도, P6 신고·학생 차단·운영자 정지·자격 만료 정리, 확인 대기열, 지점·노선 운영, 동의 설정과 계정 탈퇴 1차, Cron 정리 관측·한정 재시도. Cloudflare staging D1/Worker 생성, 16개 migration, 안전하게 닫힌 staging 배포. Private GitHub 저장소 `JooJeongwon/campus-ride` 생성과 `origin` 연결. React/Vite·Hono·Zod·strict TypeScript, D1 migration·합성 seed/로컬 리셋, 보호 API·Workers/D1 검증·CI 설정.
 
-**다음 실제 작업:** Google Auth Platform에서 지원 이메일을 선택하고 staging client/secret을 만든 뒤 설정한다. 이어 글로벌캠퍼스의 실제 Workspace `hd`, 학과 규칙, 승하차 지점, 정책 문구/URL·운전자 확인 담당자를 확정한다. staging API는 필수 설정을 검증한 뒤 연다. 운영 주체는 법적 보관기간과 탈퇴 데이터 복구·재적용 절차도 승인해야 한다. 그 전까지 탈퇴 이력·Time Travel 데이터의 즉시 완전 삭제는 보장하지 않는다. 지도 공급자 계정·canonical 도메인·사용량 한도·캠퍼스 적합성을 확인한 뒤 SDK를 결정한다. Workers Free 로그 한도 변경은 2026-12-01부터 적용되므로 운영 전 사용량을 점검한다. Production D1/Worker는 만들지 않았다.
+**다음 실제 작업:** 글로벌캠퍼스 계정으로 staging에서 실제 Workspace `hd` claim을 확인하고, 학과 규칙·승하차 지점·정책 문구/URL·운전자 확인 담당자를 확정한다. staging API는 필수 설정을 검증한 뒤 연다. 운영 주체는 법적 보관기간과 탈퇴 데이터 복구·재적용 절차도 승인해야 한다. 그 전까지 탈퇴 이력·Time Travel 데이터의 즉시 완전 삭제는 보장하지 않는다. 지도 공급자 계정·canonical 도메인·사용량 한도·캠퍼스 적합성을 확인한 뒤 SDK를 결정한다. Workers Free 로그 한도 변경은 2026-12-01부터 적용되므로 운영 전 사용량을 점검한다. Production D1/Worker는 만들지 않았다.
