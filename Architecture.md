@@ -530,7 +530,11 @@ Workers/D1 검증은 수락과 완료의 동일 키 재시도, 다른 본문 제
 
 **권고(추론):** 글로벌캠퍼스의 소규모 웹 파일럿은 현재 위치·승하차 지점 마커만 사용하므로, 운영자 NAVER Maps 계정이 primary account이면 Web Dynamic Map을 우선 후보로 삼는다. primary account가 아니면 Kakao 계정에서 Campus Ride가 무료 쿼터를 받을 첫 활성 앱인지 확인한다. 두 조건이 모두 맞지 않으면 Google은 결제 계정 연결과 월별 사용량 관리가 가능해진 뒤 검토한다. 이는 초기 사용 범위와 공식 무료 조건을 바탕으로 한 비용 우선 권고이며 캠퍼스 지도 품질·약관 적합성을 시험한 결과는 아니다.
 
-먼저 NAVER Cloud Platform 콘솔의 `Application > 대표 계정 확인`에서 계정 상태를 확인한다. primary account이면 `Maps` Application을 만들고 Web Dynamic Map만 선택한 뒤 실제 staging 서비스 URL과 일별/월별 한도·알림을 등록한다. primary가 아니면 Kakao 첫 활성 앱 자격을 확인한다. Cloudflare 계정의 `jwjoo.com` zone은 활성 상태지만 Campus Ride Worker에 연결된 custom hostname은 아직 없다. 현재 staging 호스트는 `campus-ride-staging.jwjoo0512.workers.dev`다. 지도 계정 자격, 서비스 hostname, 실제 사용량·비용 상한, 캠퍼스 지도 품질, 공급자 전송 정보의 개인정보·약관 검토가 끝나지 않아 SDK와 키는 아직 연결하지 않는다. custom hostname으로 바꾸면 Google OAuth callback 허용 주소도 함께 변경해야 한다. 정책 URL과 실기기 검증은 별도 P5 완료 조건으로 남는다.
+NAVER의 대표 계정은 Maps를 먼저 이용한 계정이며, 개인 회원은 전화번호, 사업자 회원은 사업자등록번호 기준으로 구분된다. 이는 Cloudflare Workers 요금제와 무관하다. 콘솔의 `Menu > All Services > AI·NAVER API > AI·NAVER API > Application > 대표 계정 확인`에서 상태를 조회한다. [대표 계정 기준과 확인 방법](https://guide.ncloud-docs.com/docs/application-maps-overview)
+
+Web Dynamic Map Application은 서비스 URL 등록이 필요하고 URL은 최대 10개까지 등록할 수 있다. 공식 문서는 `http://` 형식으로 입력하되 http/https는 구분하지 않고, `www`를 제외하며, 서브도메인이 있으면 대표 도메인을 입력하도록 안내한다. 따라서 URL을 등록하기 전에 Campus Ride의 custom hostname을 정한다. [Application URL 입력 규칙](https://guide.ncloud-docs.com/docs/maps-app)
+
+현재 Cloudflare zone `jwjoo.com`은 활성 상태지만 Campus Ride Worker에 연결된 custom hostname은 없다. staging 호스트는 `campus-ride-staging.jwjoo0512.workers.dev`다. 대표 계정이면 hostname을 정한 뒤 `Maps` Application에 Web Dynamic Map만 선택하고 사용량 한도·알림을 설정한다. 대표 계정이 아니면 Naver Map 호출을 시작하지 않고 Kakao 첫 활성 앱 무료 쿼터 자격을 확인한다. 지도 계정 자격, 서비스 hostname, 실제 사용량·비용 상한, 캠퍼스 지도 품질, 공급자 전송 정보의 개인정보·약관 검토가 끝나지 않아 SDK와 키는 아직 연결하지 않는다. custom hostname으로 바꾸면 Google OAuth callback 허용 주소도 함께 변경해야 한다. 정책 URL과 실기기 검증은 별도 P5 완료 조건으로 남는다.
 
 ## 23. P6 신고 접수와 운영자 상태 처리 1차 (2026-10-27)
 
