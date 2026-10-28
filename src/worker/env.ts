@@ -111,6 +111,9 @@ export const environmentSchema = z.object({
       || !exactDomain(domain))) {
       context.addIssue({ code: 'custom', message: `${key} must contain exact school domains` });
     }
+    if (key === 'ALLOWED_EMAIL_DOMAINS' && (domains.length !== 1 || domains[0] !== 'gachon.ac.kr')) {
+      context.addIssue({ code: 'custom', message: 'Remote email access is restricted to gachon.ac.kr' });
+    }
   }
   if (value.GOOGLE_CLIENT_ID && !value.GOOGLE_CLIENT_ID.endsWith('.apps.googleusercontent.com')) {
     context.addIssue({ code: 'custom', message: 'GOOGLE_CLIENT_ID is not a Google web client ID' });
