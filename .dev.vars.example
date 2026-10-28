@@ -1,0 +1,15 @@
+# 로컬 전용. 실제 비밀값을 이 예제에 넣지 않는다.
+APP_ENV=development
+APP_ORIGIN=http://localhost:8787
+SCHOOL_CONFIG_READY=false
+ALLOW_DEV_AUTH=true
+SCHOOL_ID=synthetic-school
+CAMPUS_ID=synthetic-campus
+ALLOWED_EMAIL_DOMAINS=students.example.invalid
+ALLOWED_HOSTED_DOMAINS=students.example.invalid
+STUDENT_VERIFICATION_MODE=MANUAL_REVIEW
+DEPARTMENT_SOURCE_FIELD=EMAIL_LOCAL_PART
+DEPARTMENT_TEMPLATE=student-{id}-{department}
+DEPARTMENT_PARSER_VERSION=synthetic-v1
+DEPARTMENT_ALIASES_JSON={"cs":"CS","computing":"CS","design":"DESIGN"}
+# Google OAuth settings require real credentials and confirmed school configuration.

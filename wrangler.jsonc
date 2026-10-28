@@ -1,0 +1,107 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "campus-ride-local",
+	"main": "src/worker/index.ts",
+	"compatibility_date": "2026-10-27",
+	"assets": {
+		"directory": "./dist/client",
+		"binding": "ASSETS",
+		"not_found_handling": "single-page-application",
+		"run_worker_first": [
+			"/api",
+			"/api/*"
+		]
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "campus-ride-local",
+			"database_id": "local-only",
+			"migrations_dir": "migrations"
+		}
+	],
+	"triggers": {
+		"crons": [
+			"*/5 * * * *"
+		]
+	},
+	"observability": {
+		"enabled": true,
+		"head_sampling_rate": 1,
+		"redact_query_string": true,
+		"logs": {
+			"enabled": true,
+			"invocation_logs": false,
+			"persist": true
+		}
+	},
+	"vars": {
+		"APP_ENV": "development",
+		"APP_ORIGIN": "http://localhost:8787",
+		"SCHOOL_CONFIG_READY": "false",
+		"ALLOW_DEV_AUTH": "true",
+		"SCHOOL_ID": "synthetic-school",
+		"CAMPUS_ID": "synthetic-campus",
+		"ALLOWED_EMAIL_DOMAINS": "students.example.invalid",
+		"ALLOWED_HOSTED_DOMAINS": "students.example.invalid",
+		"STUDENT_VERIFICATION_MODE": "MANUAL_REVIEW",
+		"DEPARTMENT_SOURCE_FIELD": "EMAIL_LOCAL_PART",
+		"DEPARTMENT_TEMPLATE": "student-{id}-{department}",
+		"DEPARTMENT_PARSER_VERSION": "synthetic-v1",
+		"DEPARTMENT_ALIASES_JSON": "{\"cs\":\"CS\",\"computing\":\"CS\",\"design\":\"DESIGN\"}"
+	},
+	"env": {
+		"staging": {
+			"name": "campus-ride-staging",
+			"workers_dev": true,
+			"preview_urls": false,
+			"triggers": { "crons": ["*/5 * * * *"] },
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "campus-ride-staging",
+					"database_id": "3fce8300-91d5-4773-ab53-c16d07c002f3",
+					"migrations_dir": "migrations"
+				}
+			],
+			"observability": {
+				"enabled": true,
+				"head_sampling_rate": 1,
+				"redact_query_string": true,
+				"logs": {
+					"enabled": true,
+					"invocation_logs": false,
+					"persist": true
+				}
+			},
+			"vars": {
+				"APP_ENV": "staging",
+				"APP_ORIGIN": "https://campus-ride-staging.jwjoo0512.workers.dev",
+				"SCHOOL_CONFIG_READY": "false",
+				"ALLOW_DEV_AUTH": "false"
+			}
+		},
+		"production": {
+			"name": "campus-ride-production",
+			"workers_dev": false,
+			"preview_urls": false,
+			"d1_databases": [],
+			"observability": {
+				"enabled": true,
+				"head_sampling_rate": 1,
+				"redact_query_string": true,
+				"logs": {
+					"enabled": true,
+					"invocation_logs": false,
+					"persist": true
+				}
+			},
+			"vars": {
+				"APP_ENV": "production",
+				"APP_ORIGIN": "https://production.invalid",
+				"SCHOOL_CONFIG_READY": "false",
+				"ALLOW_DEV_AUTH": "false"
+			}
+		}
+	}
+}

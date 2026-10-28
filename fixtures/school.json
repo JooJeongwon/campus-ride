@@ -1,0 +1,18 @@
+{
+  "synthetic": true,
+  "schoolId": "synthetic-school",
+  "campusId": "synthetic-campus",
+  "emailDomains": ["students.example.invalid"],
+  "hostedDomains": ["students.example.invalid"],
+  "departmentParser": {
+    "sourceField": "EMAIL_LOCAL_PART",
+    "pattern": "^student-[0-9]{3}-(?<department>[a-z]+)$",
+    "parserVersion": "synthetic-v1",
+    "trusted": false,
+    "aliases": { "cs": "CS", "computing": "CS", "design": "DESIGN" }
+  },
+  "stops": [
+    { "name": "가상 교문", "kind": "GATE", "lat": 0, "lng": 0 },
+    { "name": "가상 캠퍼스", "kind": "DESTINATION", "lat": 0.001, "lng": 0.001 }
+  ]
+}

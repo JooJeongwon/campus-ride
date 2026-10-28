@@ -1,0 +1,8 @@
+[
+  { "input": "student-001-cs", "code": "CS", "status": "UNVERIFIED" },
+  { "input": "student-002-computing", "code": "CS", "status": "UNVERIFIED" },
+  { "input": "student-003-design", "code": "DESIGN", "status": "UNVERIFIED" },
+  { "input": "student-004-unknown", "code": null, "status": "UNKNOWN" },
+  { "input": "student-005-cs-design", "code": null, "status": "UNKNOWN" },
+  { "input": "prefix-student-001-cs", "code": null, "status": "UNKNOWN" }
+]
