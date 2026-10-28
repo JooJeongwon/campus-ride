@@ -528,9 +528,9 @@ Workers/D1 검증은 수락과 완료의 동일 키 재시도, 다른 본문 제
 | Kakao Maps Web SDK | JavaScript 키에 사용할 호스트를 등록하고 SDK에는 REST 키를 쓰지 않는다. [카카오맵 설정](https://developers.kakao.com/docs/ko/kakaomap/common) | 개발자 계정의 첫 활성 앱만 무료 쿼터 대상이다. 현재 문서상 Web SDK는 일 300,000건, 전체 API 공통 월 3,000,000건이며 추가 사용은 0.1원/건으로 안내된다. 초과 사용에는 Biz Wallet과 유료 API 활성화가 필요하다. [쿼터·요금](https://developers.kakao.com/docs/ko/getting-started/quota) |
 | Google Maps JavaScript API | API 키에 HTTP referrer와 필요한 API 제한을 설정한다. [키 제한](https://developers.google.com/maps/documentation/javascript/get-api-key) | 프로젝트별 결제 계정을 연결해야 한다. Dynamic Maps 무료 사용량은 월 10,000 map loads이며 이후 공개 global 첫 구간은 $7/1,000 loads다. [공식 가격표](https://developers.google.com/maps/billing-and-pricing/pricing) |
 
-**권고(추론):** 글로벌캠퍼스의 소규모 웹 파일럿은 현재 위치·승하차 지점 마커만 사용하므로, 운영자 Kakao 계정에서 Campus Ride가 무료 쿼터를 받을 첫 활성 앱인지 확인된다면 Kakao Maps Web SDK를 우선 후보로 삼는다. 첫 앱이 아니면 NAVER primary account 여부와 콘솔 한도를 비교한다. Google은 결제 계정 연결과 월별 사용량 관리가 가능해진 뒤 검토한다. 이는 제품의 낮은 초기 범위와 공급자 공식 쿼터에서 도출한 권고이며 캠퍼스 지도 품질·약관 적합성을 시험한 결과는 아니다.
+**권고(추론):** 글로벌캠퍼스의 소규모 웹 파일럿은 현재 위치·승하차 지점 마커만 사용하므로, 운영자 NAVER Maps 계정이 primary account이면 Web Dynamic Map을 우선 후보로 삼는다. primary account가 아니면 Kakao 계정에서 Campus Ride가 무료 쿼터를 받을 첫 활성 앱인지 확인한다. 두 조건이 모두 맞지 않으면 Google은 결제 계정 연결과 월별 사용량 관리가 가능해진 뒤 검토한다. 이는 초기 사용 범위와 공식 무료 조건을 바탕으로 한 비용 우선 권고이며 캠퍼스 지도 품질·약관 적합성을 시험한 결과는 아니다.
 
-Cloudflare 계정의 `jwjoo.com` zone은 활성 상태지만 Campus Ride Worker에 연결된 custom hostname은 아직 없다. 현재 staging 호스트는 `campus-ride-staging.jwjoo0512.workers.dev`다. canonical/staging hostname, 지도 계정의 첫 앱/primary 여부, 실제 사용량·비용 상한, 캠퍼스 지도 품질, 공급자 전송 정보의 개인정보·약관 검토가 미확정이므로 SDK와 키는 아직 연결하지 않는다. custom hostname을 정한 뒤에는 Google OAuth callback 허용 주소도 함께 변경해야 한다. 정책 URL과 실기기 검증은 별도 P5 완료 조건으로 남는다.
+먼저 NAVER Cloud Platform 콘솔의 `Application > 대표 계정 확인`에서 계정 상태를 확인한다. primary account이면 `Maps` Application을 만들고 Web Dynamic Map만 선택한 뒤 실제 staging 서비스 URL과 일별/월별 한도·알림을 등록한다. primary가 아니면 Kakao 첫 활성 앱 자격을 확인한다. Cloudflare 계정의 `jwjoo.com` zone은 활성 상태지만 Campus Ride Worker에 연결된 custom hostname은 아직 없다. 현재 staging 호스트는 `campus-ride-staging.jwjoo0512.workers.dev`다. 지도 계정 자격, 서비스 hostname, 실제 사용량·비용 상한, 캠퍼스 지도 품질, 공급자 전송 정보의 개인정보·약관 검토가 끝나지 않아 SDK와 키는 아직 연결하지 않는다. custom hostname으로 바꾸면 Google OAuth callback 허용 주소도 함께 변경해야 한다. 정책 URL과 실기기 검증은 별도 P5 완료 조건으로 남는다.
 
 ## 23. P6 신고 접수와 운영자 상태 처리 1차 (2026-10-27)
 
