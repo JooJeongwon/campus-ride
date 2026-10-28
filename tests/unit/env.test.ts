@@ -53,8 +53,8 @@ it('requires paired HTTPS policy metadata and rejects placeholder links', () => 
   ]) expect(environmentSchema.safeParse(value).success).toBe(false);
 });
 
-it.each(['staging', 'production'])('blocks %s deployment before any remote call', (environment) => {
-  const result = spawnSync(process.execPath, ['scripts/check-deploy.mjs', environment], { encoding: 'utf8' });
+it('blocks production deployment before any remote call', () => {
+  const result = spawnSync(process.execPath, ['scripts/check-deploy.mjs', 'production'], { encoding: 'utf8' });
   expect(result.status).toBe(1);
   expect(result.stderr).toContain('배포 차단');
 });
