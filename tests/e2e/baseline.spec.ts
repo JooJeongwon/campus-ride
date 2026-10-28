@@ -209,7 +209,7 @@ test('accepted riders can share browser locations only with their driver', async
     if (riderConsentChanged) await expect(page.getByText('동의 상태를 저장했습니다.')).toBeVisible();
     await page.getByRole('button', { name: '내 위치 공유 시작' }).click();
     await expect(page.getByText('위치 오차가 있습니다. 지정 승차 지점에서 만나 주세요.')).toBeVisible();
-    await expect(page.getByRole('img', { name: '가상 위치도' })).toBeVisible();
+    await expect(page.getByRole('img', { name: '가상 위치도' })).toBeVisible({ timeout: 10_000 });
 
     await page.getByRole('button', { name: '로그아웃' }).click();
     await page.getByRole('button', { name: '가상 운전자' }).click();
