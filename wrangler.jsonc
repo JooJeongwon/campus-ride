@@ -78,7 +78,8 @@
 				"APP_ENV": "staging",
 				"APP_ORIGIN": "https://campus-ride-staging.jwjoo0512.workers.dev",
 				"SCHOOL_CONFIG_READY": "false",
-				"ALLOW_DEV_AUTH": "false"
+				"ALLOW_DEV_AUTH": "false",
+				"GOOGLE_CLIENT_ID": "944954288449-jts5t0tness3si2jsld0hd2dm9p0gesp.apps.googleusercontent.com"
 			}
 		},
 		"production": {

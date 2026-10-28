@@ -64,9 +64,10 @@
 ## 4. P2 — 인증·학생 자격·학과·설정
 
 - [x] 로그인 전용 Google Cloud 프로젝트 `campus-ride-gachon`을 현재 연결된 Google 계정에 생성한다. 기존 무관 프로젝트는 재사용하지 않는다.
-- [ ] Google Auth Platform에 앱을 등록하고 Web application client를 생성한다. 개인 Google 계정 소유 프로젝트이므로 audience는 `External`; 요청 scope는 현재 코드의 `openid email profile`만 사용한다. Support email은 동의 화면에 표시되므로 운영자가 선택한다.
-- [ ] staging client의 Authorized redirect URI를 `https://campus-ride-staging.jwjoo0512.workers.dev/api/v1/auth/google/callback`으로 등록한다. 이 서버 처리 흐름은 Authorized JavaScript origins를 사용하지 않는다. Production client는 별도로 출시 전 만든다.
-- [ ] Client ID를 staging Wrangler var로, Client secret을 staging Wrangler secret으로 저장한다. 비밀값은 저장소·로그·채팅에 넣지 않는다.
+- [x] Google Auth Platform에 앱과 staging Web application client를 생성한다. audience는 `External`; 요청 scope는 현재 코드의 `openid email profile`만 사용한다. Support email은 동의 화면에 표시되므로 운영자가 선택한다.
+- [x] staging client의 Authorized redirect URI를 `https://campus-ride-staging.jwjoo0512.workers.dev/api/v1/auth/google/callback`으로 등록한다. 이 서버 처리 흐름은 Authorized JavaScript origins를 사용하지 않는다. Production client는 별도로 출시 전 만든다.
+- [x] Client ID를 `wrangler.jsonc`의 staging vars에 저장한다.
+- [ ] Cloudflare staging secret을 정확한 `GOOGLE_CLIENT_SECRET` 이름으로 저장한다. 현재 등록된 이름 `GOOGLE_CLIENT_SECRE`는 마지막 `T`가 빠져 Worker에서 사용되지 않는다. 기존 secret 값이 남아 있으면 올바른 이름으로 다시 저장하고, 값이 없으면 Google Console의 **Add Secret**으로 교체용 secret을 만든다. 새 secret으로 동작을 검증한 뒤 잘못된 binding과 이전 Google secret을 정리한다.
 
 Google Auth Platform 콘솔: [campus-ride-gachon](https://console.cloud.google.com/auth/overview?project=campus-ride-gachon). 현재 요청 scope만 사용하면 Google의 External/Testing test-user 제한 예외가 적용되며, 앱 서버의 `gachon.ac.kr` + Workspace `hd` 검증이 실제 접근 제한이다. [Google App Audience 안내](https://support.google.com/cloud/answer/15549945?hl=en)
 - [x] Authorization Code, state·nonce·브라우저 바인딩, PKCE와 ID token claim/JWKS 서명 검증 구현. 합성 provider를 통한 Workers 회귀 통과; 실제 Google provider 시험은 대기.
