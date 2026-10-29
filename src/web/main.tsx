@@ -5,6 +5,7 @@ import { devLoginSchema, driverProfileDecisionSchema, driverProfileSchema, profi
 import { adminRouteCreateSchema, adminRouteUpdateSchema, adminStopSchema } from '../shared/admin';
 import { reportCreateSchema, suspendUserSchema } from '../shared/moderation';
 import { isLocationFresh, projectVirtualMap } from './location-map';
+import { loadNaverMaps, type NaverMap, type NaverOverlay, type NaverMaps } from './naver-map';
 import { rideRequestCreateSchema, tripCreateSchema, tripSearchResponseSchema, tripSearchSchema, type TripMatch, type TripSearchInput } from '../shared/trips';
 import './style.css';
 
@@ -75,6 +76,127 @@ function VirtualLocationMap({
       </li>)}
     </ul>
     <figcaption>현재 좌표를 승차 지점 기준으로 표시합니다. 실제 도로·경로·거리 안내가 아닙니다.</figcaption>
+  </figure>;
+}
+function NaverLocationMap({
+  clientId,
+  stop,
+  own,
+  shared,
+}: {
+  clientId: string;
+  stop: { name: string; lat: number; lng: number };
+  own: Omit<LocationPoint, 'nickname' | 'role' | 'key'> | null;
+  shared: LocationPoint[];
+}) {
+  const mapElement = useRef<HTMLDivElement>(null);
+  const map = useRef<NaverMap | null>(null);
+  const overlays = useRef<NaverOverlay[]>([]);
+  const center = useRef<{ lat: number; lng: number } | null>(null);
+  const [status, setStatus] = useState('네이버 지도를 불러오는 중');
+  const [maps, setMaps] = useState<NaverMaps | null>(null);
+  const markers = [
+    ...(own && isLocationFresh(own.receivedAt) ? [{
+      id: 'self', label: '내 위치', kind: 'self' as const, lat: own.lat, lng: own.lng, accuracyM: own.accuracyM,
+    }] : []),
+    ...shared.filter((point) => isLocationFresh(point.receivedAt)).map((point) => ({
+      id: point.key,
+      label: point.role === 'DRIVER' ? '운전자 위치' : `${point.nickname} 위치`,
+      kind: 'peer' as const, lat: point.lat, lng: point.lng, accuracyM: point.accuracyM,
+    })),
+  ];
+  const markersRef = useRef(markers);
+  markersRef.current = markers;
+  const markersKey = JSON.stringify(markers);
+
+  useEffect(() => {
+    let active = true;
+    const authFailure = () => {
+      overlays.current.forEach((overlay) => overlay.setMap(null));
+      overlays.current = [];
+      map.current = null;
+      setMaps(null);
+      setStatus('네이버 지도 인증에 실패했습니다. Client ID와 등록 도메인을 확인해 주세요.');
+    };
+    window.addEventListener('naver-map-auth-failure', authFailure);
+    void loadNaverMaps(clientId).then((sdk) => {
+      if (!active || !mapElement.current) return;
+      map.current = new sdk.Map(mapElement.current, {
+        center: new sdk.LatLng(stop.lat, stop.lng),
+        zoom: 16,
+      });
+      center.current = { lat: stop.lat, lng: stop.lng };
+      setMaps(sdk);
+      setStatus('');
+    }).catch(() => {
+      if (active) setStatus('네이버 지도를 불러오지 못했습니다. 연결 상태와 Client ID를 확인해 주세요.');
+    });
+    return () => {
+      active = false;
+      window.removeEventListener('naver-map-auth-failure', authFailure);
+      overlays.current.forEach((overlay) => overlay.setMap(null));
+      overlays.current = [];
+      map.current = null;
+      center.current = null;
+    };
+  }, [clientId]);
+
+  useEffect(() => {
+    if (!maps || !map.current) return;
+    if (center.current?.lat !== stop.lat || center.current.lng !== stop.lng) {
+      map.current.setCenter(new maps.LatLng(stop.lat, stop.lng));
+      center.current = { lat: stop.lat, lng: stop.lng };
+    }
+    overlays.current.forEach((overlay) => overlay.setMap(null));
+    const nextOverlays: NaverOverlay[] = [];
+    const stopPosition = new maps.LatLng(stop.lat, stop.lng);
+    nextOverlays.push(new maps.Marker({
+      map: map.current,
+      position: stopPosition,
+      title: `지정 승차 지점: ${stop.name}`,
+      zIndex: 100,
+    }));
+    for (const marker of markersRef.current) {
+      const position = new maps.LatLng(marker.lat, marker.lng);
+      const color = marker.kind === 'self' ? '#2876b8' : '#2c8062';
+      nextOverlays.push(new maps.Circle({
+        map: map.current,
+        center: position,
+        radius: marker.accuracyM,
+        fillColor: color,
+        fillOpacity: 0.18,
+        strokeColor: color,
+        strokeOpacity: 0.5,
+        strokeWeight: 1,
+        clickable: false,
+      }));
+      nextOverlays.push(new maps.Marker({
+        map: map.current,
+        position,
+        title: `${marker.label} · 오차 ±${Math.round(marker.accuracyM)}m`,
+      }));
+    }
+    overlays.current = nextOverlays;
+    return () => nextOverlays.forEach((overlay) => overlay.setMap(null));
+  }, [maps, stop.lat, stop.lng, stop.name, markersKey]);
+
+  if (status && status !== '네이버 지도를 불러오는 중') {
+    return <>
+      <p role="status">{status} 가상 위치도를 대신 표시합니다.</p>
+      <VirtualLocationMap stop={stop} own={own} shared={shared} />
+    </>;
+  }
+
+  return <figure className="naver-map">
+    <div ref={mapElement} className="naver-map__canvas" role="region" aria-label="네이버 동승 위치 지도" tabIndex={0} />
+    {status && <p className="naver-map__status" role="status">{status}</p>}
+    <ul className="virtual-map__legend" aria-label="지도 표시 항목">
+      <li><span className="virtual-map__swatch virtual-map__swatch--stop" aria-hidden="true" />{stop.name}</li>
+      {markers.map((marker) => <li key={marker.id}>
+        <span className={`virtual-map__swatch virtual-map__swatch--${marker.kind}`} aria-hidden="true" />{marker.label} · 오차 ±{Math.round(marker.accuracyM)}m
+      </li>)}
+    </ul>
+    <figcaption>지도는 지정 승차 지점 중심입니다. 위치는 30초가 지나면 지도에서 숨깁니다.</figcaption>
   </figure>;
 }
 type Profile = {
@@ -1036,12 +1158,12 @@ function App() {
         <h3>{profile.nickname}</h3>
         <p>학생 확인: {profile.affiliation.status} · 학과: {profile.department.status}</p>
         <section aria-labelledby="consent-title">
-          <h3 id="consent-title">동의와 위치 개인정보 설정</h3>
-          <p>약관·개인정보 동의가 있어야 서비스를 이용할 수 있습니다. 위치 수집과 동승 상대 제공은 각각 선택하며, 여기서 언제든 철회할 수 있습니다.</p>
+          <h3 id="consent-title">약관·개인정보 확인과 위치 설정</h3>
+          <p>서비스 이용약관 확인과 개인정보 처리방침 확인이 필요합니다. 처리방침 확인은 별도의 개인정보 처리 동의를 대신하지 않습니다. 위치 수집과 동승 상대 제공은 각각 선택하며, 여기서 철회할 수 있습니다.</p>
           {(['TERMS', 'PRIVACY', 'LOCATION_COLLECTION', 'LOCATION_SHARING'] as const).map((kind) => {
             const policy = profile.requiredConsents[kind];
             const title = kind === 'TERMS' ? '서비스 이용 약관'
-              : kind === 'PRIVACY' ? '개인정보 처리 안내'
+              : kind === 'PRIVACY' ? '개인정보 처리방침 확인'
                 : kind === 'LOCATION_COLLECTION' ? '내 위치를 임시 수집' : '내 위치를 동승 상대에게 제공';
             return <div className="consent-row" key={kind}>
               <label><input type="checkbox" checked={policy.accepted} disabled={consentBusy}
@@ -1290,13 +1412,17 @@ function App() {
           <p>상대 화면에 내 위치가 응답된 시각과 상대, 만남 조율 목적을 기록해 여기에 표시합니다.</p>
           <p>위치 동의는 위 설정에서 관리할 수 있습니다. 위치 공유를 철회하면 현재 좌표가 삭제되고 이후 업로드가 거절됩니다.</p>
           <p>지정 승차 지점: {locationStop?.name ?? (profile.activeActivity?.role === 'DRIVER' ? profile.activeTrip?.originName : profile.activeRequest?.originName)}</p>
-          <p>실제 지도 SDK 대신 현재 좌표를 나타내는 가상 위치도를 사용합니다.</p>
           <div className="actions">
             <button type="button" disabled={!locationConsented || consentBusy || locationStarted}
               onClick={() => void startLocationSharing(activeLocationContext)}>내 위치 공유 시작</button>
           </div>
           <p role="status">{locationStatus || (locationConsented ? '위치를 갱신하면 동승 상대에게 실제 제공된 내역을 표시합니다.' : '위치 수집과 상대 제공 동의는 각각 선택할 수 있습니다.')}</p>
-          {locationConsented && locationStop && <VirtualLocationMap stop={locationStop} own={ownLocation} shared={sharedLocations} />}
+          {locationConsented && locationStop && (import.meta.env.VITE_NAVER_MAP_CLIENT_ID?.trim()
+            ? <NaverLocationMap clientId={import.meta.env.VITE_NAVER_MAP_CLIENT_ID.trim()} stop={locationStop} own={ownLocation} shared={sharedLocations} />
+            : <>
+              <p>네이버 지도 Client ID가 설정되지 않아 가상 위치도를 표시합니다.</p>
+              <VirtualLocationMap stop={locationStop} own={ownLocation} shared={sharedLocations} />
+            </>)}
           {locationConsented && locationStop && <p>승차 지점 좌표: {locationStop.lat.toFixed(5)}, {locationStop.lng.toFixed(5)}</p>}
           {locationConsented && ownLocation && <div>
             <h4>내 위치 · 오차 ±{Math.round(ownLocation.accuracyM)}m</h4>

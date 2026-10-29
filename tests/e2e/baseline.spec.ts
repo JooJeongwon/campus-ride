@@ -163,7 +163,7 @@ test('accepted riders share locations after the owner acknowledges each disclosu
   await page.context().grantPermissions(['geolocation']);
   await page.context().setGeolocation({ latitude: 37.5001, longitude: 127.0002, accuracy: 75 });
   const riderContext = await browser.newContext({
-    baseURL: 'http://localhost:8787',
+    baseURL: 'http://localhost:8788',
     permissions: ['geolocation'],
     geolocation: { latitude: 37.5, longitude: 127, accuracy: 75 },
   });

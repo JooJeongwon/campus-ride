@@ -1,6 +1,6 @@
 # 교내 동승 매칭 웹앱 — Roadmap
 
-작성일: 2026-10-28 · 상태: **가천대학교 글로벌캠퍼스 단일 운영 범위와 `gachon.ac.kr` 기준 확정; staging OIDC claim 확인 완료(일반 API 차단); 위치 제공 전·후 확인, 위치 동의 철회 시 본인 위치 확인자료 온라인 삭제, 보유기간과 탈퇴·D1 복구 절차를 문서/로컬 구현. 공개 문의처·위치정보법/백업 처리 판단·외부 운영대장·복구 훈련·실기기 검증 대기**
+작성일: 2026-10-29 · 상태: **가천대학교 글로벌캠퍼스 단일 범위와 `gachon.ac.kr` 기준 확정; staging OIDC claim 확인 완료(일반 API 차단); 운영주체 가천대학교·운영팀 고범규·김동규·남성수·주정원·최익준·문의처 `jwjoo0512@gmail.com` 사용자가 지정. MVP에서는 학교 공식 승인/위임과 위치정보사업 분류/신고 검토를 보류하기로 결정했으며 완료·면제 판단은 아님. 14세 미만 미대상은 사용자 제품 범위 가정이며 로그인에서 연령을 검증하지 않음. v1.2 정책 초안은 미게시·미효력. 위치 API의 사전/사후 안내 순서는 Workers/D1 테스트 통과; 운행별 동의·매 제공 즉시 단말 통지·일시중지·법정 기록 완전성·D1 백업 파기·국외처리 상세·외부대장·복구 훈련·실기기 검증 대기**
 
 이 문서는 [Project.md](Project.md)의 요구사항을 [Architecture.md](Architecture.md)의 구조로 구현하기 위한 순서다. [AGENTS.md](AGENTS.md)의 검증·보안·작업 규칙을 적용한다. 일정과 담당자는 팀 구성 후 정하며 아래 체크박스는 실제 완료 전까지 체크하지 않는다.
 
@@ -32,8 +32,8 @@
 - [ ] 실제 교문·목적지·안전한 정차 위치·허용 노선을 확인한다.
 - [x] 같은 학과 우선은 순위, 성별 선택은 전체 동승자 간 조건이라는 기본값을 제품 결정으로 기록한다.
 - [x] 보상 미정/MVP 비활성, 편도·시간·정원·만료 정책을 결정 기록에 남긴다.
-- [ ] 지도 공급자 후보와 도메인 키 발급·이용 조건을 확인한다.
-- [ ] 운영 주체·신고 대응·학교 협의·개인정보/위치/운송 검토의 담당자를 지정한다.
+- [x] 사용자 결정으로 NAVER Web Dynamic Map을 선택한다. NCP Application 허용 호스트와 계정/요금 확인은 P5에 남긴다.
+- [x] 사용자 결정: 운영팀 명단은 고범규·김동규·남성수·주정원·최익준이다. MVP에서는 공식 학교 위임·책임자 임명·개별 역할/권한 결정을 보류한다. 명단만으로 실제 운영 권한이 부여된 것으로 보지 않는다.
 
 **완료 기준:** Project의 학교별 확인 표에 실제 근거 또는 명시적 미확정 상태가 있고, 확정 정보와 가정이 구분된다. 학교가 특정되지 않아도 합성 학교 설정과 파서 fixture는 준비한다. 실제 서비스가 합법/출시 가능하다고 이 단계에서 추정 선언하지 않는다.
 
@@ -133,7 +133,10 @@ Google Auth Platform 콘솔: [campus-ride-gachon](https://console.cloud.google.c
 
 ## 7. P5 — GPS·지도·만남 화면
 
-- [ ] 운영 계정·실제 호스트·예상 사용량과 캠퍼스 적합성 검토를 바탕으로 지도 공급자를 확정하고 도메인 제한 키·정책·SDK 어댑터를 연결한다. 공식 설정 문서 비교는 [Architecture §22](Architecture.md)에 기록했다.
+- [x] NAVER Web Dynamic Map SDK 연결 코드, 지도/위치 정확도 오버레이, 인증 실패 fallback과 CSP origin을 구현했다. [공식 SDK](https://navermaps.github.io/maps.js.ncp/docs/tutorial-2-Getting-Started.html) 기준 `ncpKeyId` 사용.
+- [x] 사용자가 NCP Maps Client ID를 발급해 `.env.local`에 로컬 전용으로 설정했다. 값은 Git에 포함하지 않는다.
+- [ ] NCP 콘솔에서 Web Dynamic Map 선택과 `localhost` 허용을 확인하고, 자체 staging hostname을 연결해 서비스 호스트를 등록한다. 현재 `workers.dev` 공유 호스트는 staging 지도 키에 사용하지 않는다.
+- [ ] Maps 대표 계정/무료량·사용량 상한·위탁/국외이전·이용약관을 확인하고 실제 타일 인증을 검증한다.
 - [x] 지정 지점명·좌표, 본인/상대 위치·오차·최근 갱신 시각을 표시한다. 실제 도로가 아닌 가상 위치도에 현재 위치와 정확도 범위를 표시한다.
 - [x] 목적별 위치 동의와 브라우저 권한 요청을 분리한다.
 - [x] 수락 이후 공유 시작, 출발/취소/종료/철회 시 중지·삭제를 구현한다.
@@ -150,11 +153,15 @@ Google Auth Platform 콘솔: [campus-ride-gachon](https://console.cloud.google.c
 
 **완료 기준:** AC-07·AC-08을 통과한다. 화면이 오래된 좌표를 현재 좌표로 표시하지 않으며, GPS로 실제 탑승을 자동 판정하지 않는다.
 
-현재 로컬 구현은 위 핵심 흐름과 D1 권한 검증, 승차 지점 기준의 SVG 가상 위치도를 갖췄지만 P5는 미완료다. 30초 넘게 갱신되지 않은 점은 위치도에서 숨기며, 가상 위치도는 실제 도로·경로·거리 안내를 제공하지 않는다. [Architecture §22](Architecture.md)에 2026-10-28 기준 공식 쿼터·요금 비교를 갱신했다. Cloudflare zone `jwjoo.com`은 활성 상태지만 Campus Ride custom hostname은 없다. 운영 지도 계정의 free/primary-app 자격, 호스트명, 사용량 상한, 실제 캠퍼스 지도 적합성은 미확정이라 SDK 연결은 보류한다. 정책 URL과 고지, iOS Safari·Android Chrome 실기기 시험도 남아 P5 완료 기준 전에 확정·검증하고 결과를 기록한다.
+현재 위치 공유 core와 가상 위치도에 NAVER Web Dynamic Map SDK를 연결했다. 사용자가 Client ID를 발급해 `.env.local`에 설정했고 localhost 브라우저에서 SDK 응답 200 및 Map 인스턴스 생성을 확인했다. 지도 타일 표시와 NCP Application 설정은 확인하지 못했다. staging custom hostname도 없으므로 staging 키 등록·타일 확인, Maps 대표 계정/사용량 제한·요금과 개인정보 고지, 실제 캠퍼스 안전지점 및 iOS Safari·Android Chrome 검증이 남아 P5는 미완료다. staging API는 auth-only로 닫혀 있다.
 
 2026-10-28 추가: `0018_location_disclosures.sql`과 위치 API/UI를 연결했다. 새 위치 sequence가 상대 화면에 처음 응답될 때 좌표를 복사하지 않고 수신자 ID·닉네임/역할 스냅샷·운행/요청·sequence·목적·시각을 기록하며, 위치 소유자 화면은 현재 활동의 최근 20건을 인앱으로 알린다. 동일 sequence 반복 조회는 중복 기록하지 않고 통지 확인 여부도 저장하지 않는다. 6개월 정리는 임시 로컬 기준이며 운영자 적용 여부와 더 긴 보관 필요성은 미확정이다. 따라서 법률상 매회 통지/확인자료 요건을 충족했다고 보지 않으며 P5 미완료다. 테스트·실기기 검증은 실행하지 않았다.
 
-2026-10-28 추가: 공식 지도 문서를 다시 확인해 NAVER Web Dynamic Map 대표 계정 무료 조건, Kakao Maps Web SDK(첫 활성 앱일 때만 무료; 문서상 일 300,000 SDK calls, 월 3,000,000 API calls), Google Maps 월 10,000 Dynamic Maps 무료 사용과 billing 요구를 Architecture §22에 반영했다. NAVER 대표 계정은 Maps 최초 이용 계정이며 개인은 전화번호, 사업자는 사업자등록번호 기준이라는 점과, Web Dynamic Map URL은 대표 도메인 단위로 등록한다는 규칙도 기록했다. 소규모 웹 파일럿은 NAVER 계정이 대표 계정이면 네이버 우선, 아니면 Kakao 무료 쿼터 자격을 확인하는 순서로 권고하며 공급자를 확정하지 않았다. Cloudflare 읽기 전용 확인에서 `jwjoo.com` zone 활성과 기존 `canvas.jwjoo.com` 연결만 확인했고 Campus Ride hostname은 없었다. 다음은 NCP 콘솔에서 대표 계정 상태 확인 후 Campus Ride hostname을 결정하는 것이다. 그 전에는 URL·키를 만들거나 SDK를 연결하지 않는다.
+2026-10-28 추가: 공식 지도 문서에서 NAVER Web Dynamic Map의 `ncpKeyId`, Web Dynamic Map 선택, 서비스 URL host 등록 규칙, primary account 무료 조건을 확인해 Architecture §22에 반영했다. 사용자가 NAVER를 선택해 SDK 코드, accuracy overlay, CSP 허용 origin, 미설정/인증 실패 시 가상 지도 fallback을 연결했다. NAVER의 무료량은 primary account 여부에 달려 있고 실제 계정 상태는 아직 확인되지 않았다. Cloudflare zone `jwjoo.com`은 활성이나 Campus Ride custom hostname은 없다. 당시에는 Client ID가 없어 실제 지도를 검증하지 못했다.
+
+2026-10-28 추가: 사용자가 NCP Client ID를 발급해 전달했고 로컬 `.env.local`에만 설정했다. 값은 Git에 저장하지 않는다. NCP 콘솔의 서비스 선택/허용 도메인과 Maps 대표 계정/사용량 설정은 직접 확인할 수 없어 미완료로 남긴다. `localhost`에서 실제 타일이 표시되는지 확인하고 staging에는 자체 hostname 연결 후 별도 허용 도메인을 등록해야 한다.
+
+2026-10-28 추가: localhost 실제 SDK smoke에서 callback 직후 `naver.maps`가 아직 준비되지 않은 동작을 발견해 로더가 API 객체를 기다리도록 고쳤다. 재확인 결과 SDK 응답 200, SDK 전역 준비, Map 인스턴스 생성을 확인했다. 타일 렌더링/사이트 제한은 검증하지 못했다. 회귀 단위검사 26개, lint, typecheck, build가 통과했고 staging client asset에 로컬 key가 없는 것을 확인했다. Playwright는 8788 전용 서버를 key 없이 띄우며, staging 배포 build는 명시적으로 전달한 key만 사용하고 기본값은 빈 값이다.
 
 2026-10-27: 위치 동의·수락 관계 위치 API·D1 출발/취소/철회 삭제·브라우저 공유 흐름을 구현했다. `npm run lint`, `typecheck`, `test:unit`(23), `test:integration`(37), `test:e2e`(6), `db:reset:local`, `build`가 통과했다. E2E는 새 합성 D1에서 실행했고 기존 로컬 D1을 백업 후 복원했다. 지도 설정·실제 위치 고지·모바일 실기기 시험은 미완료라 P5는 계속 진행 중이다.
 
@@ -170,11 +177,16 @@ Google Auth Platform 콘솔: [campus-ride-gachon](https://console.cloud.google.c
 - [x] 개인정보·위치 수집/상대 제공·철회·계정 삭제 화면을 완성한다.
 - [x] 계정 탈퇴 trigger가 차단 관계를 정리하고 위치 제공 내역의 탈퇴 사용자 닉네임을 가명화한다. 개인정보 이력 전부가 삭제되는 것은 아니다.
 - [x] 운영자 확인으로 Workers Free 플랜을 기록하고, staging D1의 `production` backend·APAC region·현재 Time Travel bookmark를 확인한다. 공식 Free Time Travel 복구 창은 7일이다.
-- [x] 4개 정책 문서와 운영 문서에 보유기간, 탈퇴·위치 동의 철회 시 정리, 7일 D1 Time Travel 복구 후 삭제/철회 재적용 절차를 정했다. 180일 운행/요청, 종결 후 1년 신고, 철회 후 1년 동의, 최대 6개월 위치 제공사실, 최대 1년 위치 API 접근기록을 cleanup에 연결했다. 위치 제공자료는 위치 동의 철회 또는 탈퇴 때 본인 위치와 관련된 행을 온라인 DB에서 즉시 지운다.
-- [x] 위치 제공 전·후 소유자가 각 안내 확인 버튼을 눌렀을 때만 확인 시각을 기록하도록 API를 바꾸고 Workers/D1 테스트로 순서를 확인한다.
+- [x] 4개 정책 문서와 운영 문서에 보유기간, 탈퇴·위치 동의 철회 처리 및 7일 D1 Time Travel 복구 후 삭제/철회 재적용 초안을 정리했다. 180일 운행/요청, 종결 후 1년 신고, 철회 후 1년 동의, 위치 확인자료 6개월, 위치 API 접근기록 1년 cleanup을 연결했다. 위치정보법 적용 시 확인자료는 원칙적으로 최소 6개월 보관하되 관련 동의 철회 때 철회 범위 자료를 지체 없이 파기한다. 법정 백업 파기 적합성은 미확정이다.
+- [x] 위치 제공 전·후 소유자가 각 안내 확인 버튼을 눌렀을 때만 확인 시각을 기록하도록 API를 바꾸고 Workers/D1 테스트로 순서를 확인한다. 이 동작은 위치정보법상 동의나 즉시 통지 확인이 아니다.
 - [x] 위치 확인 필드는 실제 시스템 전송과 혼동되지 않도록 소유자가 제공 후 안내 확인 버튼을 누른 시각을 기록하고, `post_notice_acknowledged_at` 이름을 사용한다. 화면 렌더링이나 polling으로 자동 기록하지 않는다.
-- [ ] 실제 운영자·담당자 문의처를 입력한다. 암호화된 D1 외부 삭제/철회 대조부와 5년 Cloudflare 권한대장을 실제 구성·점검하고 복구 훈련한다.
-- [ ] 위치정보 사업자 분류·신고/등록 해당 여부, Cloudflare 계약상 법인·처리/이전 국가와 재수탁자 내용을 확인한다. 문서는 이 확인 전까지 게시/동의에 사용하지 않는다.
+- [x] MVP 사용자 결정: 운영팀 이름은 고범규·김동규·남성수·주정원·최익준으로 기록한다. 학교의 공식 운영 승인·위임, 위치정보관리책임자 지정과 실명별 권한 확정은 MVP에서 보류한다. 완료·면제 처리하지 않으며 공식 학교 서비스로 표시하지 않는다.
+- [x] MVP 사용자 결정: 위치정보법 제9조 사업 분류·신고 또는 제9조의2 예외 확인은 보류한다. 적법성·면제 판단을 하지 않으며 실제 위치 기능 출시 조건으로 유지한다.
+- [ ] 운행별 공유 세션마다 수신자·목적을 특정한 적극적 허용/거부, 수집 단말 또는 사전 지정 단말로 매 제공 즉시 통지, 일시중지와 철회 기능을 구현하고 실제 기기에서 증명한다. 법정 수집사실 확인자료(수집요청인·수집일시·수집방법)와 이용·제공사실 확인자료(제공받는 자·취득경로·이용/제공일시·방법)를 자동 기록하는지도 검증한다. 현재 안내 확인 버튼은 세션 동의가 아니다.
+- [ ] 동의 철회 후 7일 D1 Time Travel 사본에 남는 위치/확인자료의 법적 파기 요건을 해결한다. 외부 대조부·복원 후 재적용만으로 요건을 충족했다고 간주하지 않는다.
+- [ ] Cloudflare, Google, NAVER의 처리 역할·항목·국가·수탁자/재수탁자·보유기간·이전 근거를 계정/계약으로 확인하고 필요한 국외이전 고지·동의를 확정한다. 정보가 불완전한 정책은 게시하지 않는다.
+- [x] MVP 사용자 결정: 대학생 대상 서비스라 만 14세 미만은 없다고 보고 별도 생년월일/보호자 동의 흐름은 MVP 범위에서 제외한다. Google Workspace 계정 또는 `gachon.ac.kr` 이메일은 연령 증명이 아니므로 미성년자 부재가 기술적으로 확인됐다고 표시하지 않는다. 실제 14세 미만 이용자가 확인되면 위치 처리를 중지하고 보호자 동의/확인 절차를 마련한다.
+- [ ] 암호화된 외부 삭제/철회 대조부와 위치정보시스템 권한 부여·변경·말소 5년 대장을 실제 구성·점검하고 D1 복구/재적용 훈련을 수행한다.
 - [x] Worker 응답에 동일 origin CSP·위치 Permissions-Policy를 적용하고, 사용자별 요청/코드 제한을 확인한다. Worker 애플리케이션 로그는 민감값을 출력하지 않는다.
 - [x] Wrangler에서 query string redaction과 invocation URL 로그 비활성화를 설정하고, Cron 정리 성공/지연/실패를 안전한 구조화 로그로 남긴다.
 - [x] 운영자가 확인한 Workers Free 플랜의 로그 한도·보존·비용 조건을 공식 문서와 staging 설정에 대조한다. 2026-11-30까지 200,000 이벤트/일·3일 보존, 2026-12-01부터 무료 0.5GB/일·7일 보존이며 Free 한도 초과 시 수집이 중단된다. 실제 사용량은 측정하지 않았다.
@@ -203,11 +215,14 @@ Google Auth Platform 콘솔: [campus-ride-gachon](https://console.cloud.google.c
 
 2026-10-28 추가: 연결된 Cloudflare 계정에 대해 staging Worker/D1 설정을 읽기 전용으로 확인했다. `campus-ride-staging` D1에 16개 migration이 적용됐고 backend는 `production`, region은 APAC, jurisdiction은 미설정이다. 운영자가 Workers Free 플랜이며 도메인 등록은 별도 결제라고 확인했다. 현재 Time Travel bookmark도 조회했다. 공식 문서상 Free 복구 창은 7일이다. Worker는 DB 바인딩 연결, observability/logs 활성화, query redaction, invocation URL 비활성, persist 설정을 갖췄다. Workers Free 로그는 2026-11-30까지 200,000 이벤트/일·3일 보존, 2026-12-01부터 무료 0.5GB/일·7일 보존으로 전환된다. Billing Read API 권한이 없어 플랜을 API로 독립 확인하거나 실제 사용량을 조회하지는 못했으나 운영자 제공 정보를 기준으로 plan-level 항목을 기록했다. 보관·복구 절차 승인과 법적 보관기간은 남아 P6 미완료다. 학교 준비/개발 인증은 false이며 staging API는 503으로 닫혀 있다. 합성 seed나 학교 데이터는 올리지 않았다.
 
-2026-10-28 추가: 보유기간과 복구 시 탈퇴/철회 재적용 절차를 네 정책 문서 및 `docs/operations/data-retention-and-restore.md`에 확정안으로 정했다. 계정 탈퇴 시 직접 식별값 대체/세션·현재 위치·차단 정리, 종료 요청/운행 180일, 종결 신고·동의/일반 감사 1년, 위치 제공사실 6개월, 위치 API 접근기록 1년, D1 Free 복구 창 7일을 반영했다. Cron cleanup 및 deletion tombstone 만료 회귀를 추가했다.
+2026-10-28 추가: 보유기간과 복구 시 탈퇴/철회 재적용 절차를 네 정책 문서 및 `docs/operations/data-retention-and-restore.md`에 당시 초안으로 정리했다. 계정 탈퇴 시 직접 식별값 대체/세션·현재 위치·차단 정리, 종료 요청/운행 180일, 종결 신고·동의/일반 감사 1년, 위치 확인자료 6개월, 위치 API 접근기록 1년, D1 Free 복구 창 7일을 반영했다. 이번 현행 법령 대조에서 위치 확인자료는 적용 시 원칙적으로 최소 6개월 보관하되 동의 철회 범위는 지체 없이 파기해야 함을 명시했고, 백업 파기 적합성은 미확정으로 남겼다. Cron cleanup 및 deletion tombstone 만료 회귀를 추가했다.
 
 2026-10-28 추가: location sequence는 소유자가 사전 안내 확인 버튼을 누르기 전 좌표를 반환하지 않는다. 실제 위치 제공 시각과 제공 후 안내 확인 버튼을 누른 시각을 별도 기록한다(`post_notice_acknowledged_at`). 위치 소유자의 동의 철회/탈퇴 시 본인 위치 제공 확인자료·owner별 접근기록을 온라인 DB에서 삭제한다. 제공자 화면 활성 heartbeat와 동일 sequence 1회 응답을 적용했다. 위치 API 통합 검증으로 알림 gate·CSRF·제공 시각·철회 자료 삭제를 확인한다. 위치정보법 적용 여부, 즉시 통지·백업 파기 해석, D1 외부 대조부, 외부 접근권한 대장과 staging 복구 훈련은 남아 원격 API를 열지 않는다. 새 migration `0020_location_notice_and_access_log.sql`은 로컬 테스트에는 적용됐지만 원격 staging D1에는 아직 적용하지 않았다.
 
-정책 문서는 확정안이지만 시행 전이다. 실제 운영자 연락처, 위치정보 사업자 분류/신고·등록 여부, 위치 동의 철회와 D1 백업 사본의 법적 처리, Cloudflare 외부 삭제/철회 대조부와 5년 권한대장, 실제 복구 훈련이 남아 staging 일반 API는 503 차단 상태로 유지한다.
+2026-10-28 법령 검토: 네 정책 문서와 복구 절차를 v1.1 초안으로 갱신하고 운영주체 지정(가천대학교), 팀(주정원 등 5명), 서비스 문의처(`jwjoo0512@gmail.com`), 글로벌캠퍼스 주소/대표전화와 가천대 공식 개인정보보호팀 연락처를 기재했다. 가천대의 서비스 승인/위임, 서비스별 개인정보·위치정보 책임자와 사업자 신고 판단은 확인 전이다. 위치정보법상 지정 제3자에게 위치를 제공하기 전 적극적 동의, 매회 즉시 통지, 일시중지권과 철회 시 관련 자료의 지체 없는 파기가 적용될 수 있다. 현재 UI의 확인 버튼, 계정 단위 heartbeat, D1 7일 복구 사본은 이 요건을 보장하지 않는다. Cloudflare APAC region은 국내 저장 보장이 아니며 국외 처리 목적지/재수탁자도 미확정이다. 따라서 문서들은 게시·동의에 사용할 수 없고 staging 일반 API는 503 차단 상태로 유지한다.
+2026-10-29 법령·구현 대조 당시: 위치정보법 확인자료를 수집사실(수집요청인·수집일시·수집방법)과 이용·제공사실(제공받는 자·취득경로·이용/제공일시·방법)로 나누어 정책·Roadmap·Architecture에 반영했다. 개인정보 처리방침 §3에 현재 API가 보여주는 수신자 범주와 항목을 추가했다. 현재 schema의 자동기록 충족 여부는 검증되지 않았다. 당시 만 14세 미만 처리 여부는 미결정이었으며 이후 사용자 결정은 아래 기록에 있다. 운행별 동의·즉시 통지·일시중지, D1 백업 파기, 국외 처리, 운영 대장·복구 훈련이 미완료라 초안은 게시하지 않고 staging 일반 API를 계속 닫는다.
+
+2026-10-29 사용자 범위 결정 및 확인: 운영팀 명단을 고범규·김동규·남성수·주정원·최익준으로 바꾸고 공식 위임/책임자 임명과 위치정보사업 분류·신고 검토를 MVP에서 보류했다. 사용자는 대학생 대상이라 만 14세 미만은 없다고 판단해 MVP 범위에서 연령/보호자 절차를 제외했다. 인증은 연령을 증명하지 않으므로 이 내용은 대상 가정으로 남긴다. 기존 `tests/integration/locations.test.ts`는 사전 안내 확인→좌표 제공→사후 안내 확인, 역할별 권한·TTL·철회 삭제를 Workers/D1에서 통과했다. 이 검증은 운행별 동의·매 제공 즉시 단말 통지·일시중지·법정 기록 충족을 확인하지 않았다. Google·Cloudflare·NAVER 공식 공개자료를 대조해 개인정보 처리방침/정책 문서를 v1.2 초안으로 갱신했다. Cloudflare D1은 한국 전용 jurisdiction을 제공하지 않고 APAC location hint는 저장 국가를 보장하지 않는다. 현재 원격 조회는 Cloudflare API 인증 오류로 재확인하지 못했다. 국외처리 국가·수탁자 계약, 백업 파기와 관련 구현이 남아 원격 일반 API는 계속 닫는다.
 
 2026-10-28 로컬 검증: `npm run lint`, `typecheck`, `test:unit`(24), `test:integration`(49), `test:e2e`(6), `build`가 통과했다. `git diff --check`도 문서 수정 뒤 통과했다. 실기기·D1 복구 훈련은 수행하지 않았고 migration `0020`은 로컬에만 적용했다. staging 원격 변경·배포·일반 API 개방은 하지 않았다.
 
@@ -249,4 +264,6 @@ Google Auth Platform 콘솔: [campus-ride-gachon](https://console.cloud.google.c
 
 **현재 완료:** 네 설계 문서, P1~P4 로컬 구현, P5 위치 공유 핵심 흐름과 가상 위치도, P6 신고·차단·제한·운영 UI·계정 탈퇴 정리, Cron 관측·한정 재시도. Cloudflare staging D1/Worker와 migration, Google OIDC 검증 전용 staging 설정(일반 API 차단). Private GitHub 저장소 `JooJeongwon/campus-ride`와 `origin`. React/Vite·Hono·Zod·strict TypeScript, D1 migration·합성 seed/로컬 리셋, 보호 API·Workers/D1 검증·CI 설정.
 
-**다음 실제 작업:** 실제 운영자 이름/주소/이메일/전화, 위치정보 사업자 분류·신고 여부, Cloudflare 계약상 법인·처리/이전 국가를 확인한다. D1 밖 암호화 삭제/철회 대조부와 5년 위치시스템 권한대장을 만들어 복구 훈련을 마친다. 그 뒤 staging migration 0020을 닫힌 API 상태로 원격 적용하고 복구 후 삭제 재적용을 검증한다. 일반 API는 그 전까지 계속 503으로 닫는다. 지도 공급자·캠퍼스 지점·실기기 검증 및 실제 사용자 E2E도 미완료다. Production D1/Worker는 만들지 않았다.
+**다음 실제 작업:** 사용자의 MVP 결정으로 학교 공식 위임과 위치사업자 신고 검토는 보류 기록으로 남겼고 완료 처리하지 않았다. 제공자별 국외 처리 고지는 공개 자료를 반영해 v1.2로 정리했지만 Cloudflare 계정 계약/실제 서비스별 수탁자, Google 인증 처리 국가·보유, NAVER Maps API의 이용자 요청 데이터 국가·보유는 확인되지 않아 게시용으로 확정되지 않았다. 한국 전용 D1 jurisdiction은 없다.
+
+2026-10-29 재확인: Cloudflare 연결의 읽기 전용 API와 Wrangler 조회가 성공했다. staging D1은 `production` backend, jurisdiction 미설정이며 원격 migration은 0019까지라 0020이 미적용이다. D1 조회 응답 한 건은 APAC/ICN에서 처리됐으나 저장 국가를 보장하는 정보는 아니다. 배포 Worker는 여전히 `STAGING_AUTH_TEST_ONLY=true`, `SCHOOL_CONFIG_READY=false`이며 원격 설정에서 `BOARDING_HMAC_KEY`와 네 정책 URL/버전이 확인되지 않았다. Google OAuth 콘솔의 게시 상태는 이 세션에서 확인할 수 없다. 사용자가 일반 API와 실시간 위치를 모두 열라고 요청했으나, 법률 검토 반영 정책은 미게시 초안이고 위치 동의·즉시 통지·자동 확인자료 및 복구 사본 파기 조건도 미완료여서 개방·migration·배포는 실행하지 않았다. 먼저 실제 운영 책임자/연락처와 제공자별 국외처리 고지를 확정하고, 위치정보사업 분류·신고 보류 결정을 재검토하며, 구현/백업 조건과 Google 공개 상태를 해결해야 한다. 실제 지도 타일/허용 호스트·요금과 iOS/Android 실기기도 검증한다. Production D1/Worker는 만들지 않았다.

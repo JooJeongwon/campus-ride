@@ -15,6 +15,9 @@ it('serves safe health and JSON errors through the Worker runtime', async () => 
   expect(health.headers.get('Cache-Control')).toBe('no-store');
   expect(health.headers.get('Content-Security-Policy')).toContain("default-src 'self'");
   expect(health.headers.get('Content-Security-Policy')).toContain("frame-ancestors 'none'");
+  expect(health.headers.get('Content-Security-Policy')).toContain('script-src \'self\' https://oapi.map.naver.com');
+  expect(health.headers.get('Content-Security-Policy')).toContain('img-src \'self\' https://*.map.naver.com https://*.map.naver.net');
+  expect(health.headers.get('Content-Security-Policy')).toContain("style-src-attr 'unsafe-inline'");
   expect(health.headers.get('Permissions-Policy')).toContain('geolocation=(self)');
   expect(health.headers.get('X-Content-Type-Options')).toBe('nosniff');
   for (const path of ['/api', '/api/unknown', '/api/v1/missing']) {

@@ -29,7 +29,12 @@ if (environment === 'production') {
     console.error('staging 배포 차단: Gachon 로그인 검증 전용이며 일반 API가 닫힌 설정이어야 합니다.');
     process.exitCode = 1;
   } else {
-    const env = { ...process.env, CLOUDFLARE_ENV: 'staging', VITE_STAGING_AUTH_TEST_ONLY: 'true' };
+    const env = {
+      ...process.env,
+      CLOUDFLARE_ENV: 'staging',
+      VITE_STAGING_AUTH_TEST_ONLY: 'true',
+      VITE_NAVER_MAP_CLIENT_ID: process.env.VITE_NAVER_MAP_CLIENT_ID ?? '',
+    };
     const build = spawnSync('npm', ['run', 'build'], { stdio: 'inherit', env });
     if (build.status !== 0) {
       process.exitCode = build.status ?? 1;
