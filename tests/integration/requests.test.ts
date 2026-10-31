@@ -5,7 +5,7 @@ import worker from '../../src/worker';
 const origin = 'http://localhost:8787';
 const riderId = '20000000-0000-4000-8000-000000000002';
 const tripId = '50000000-0000-4000-8000-000000000001';
-const routeId = '40000000-0000-4000-8000-000000000001';
+const routeId = '40000000-0000-4000-8000-000000000002';
 const vehicle = { vehicleModel: '합성 차량', vehicleColor: '회색', vehicleIdentifier: 'SYNTHETIC-REQUEST', passengerCapacity: 2 };
 
 async function request(path: string, options: { method?: string; cookie?: string; csrf?: string; key?: string; body?: unknown } = {}) {
@@ -32,14 +32,6 @@ async function acceptConsents(session: { cookie: string; csrf: string }) {
   for (const kind of ['TERMS', 'PRIVACY']) {
     expect((await request('/api/v1/me/consents', {
       method: 'POST', ...session, body: { kind, policyVersion: 'local-demo-v1', granted: true },
-    })).status).toBe(200);
-  }
-}
-
-async function acceptLocationConsents(session: { cookie: string; csrf: string }) {
-  for (const kind of ['LOCATION_COLLECTION', 'LOCATION_SHARING']) {
-    expect((await request('/api/v1/me/consents', {
-      method: 'POST', ...session, body: { kind, policyVersion: 'local-location-v1', granted: true },
     })).status).toBe(200);
   }
 }
@@ -471,8 +463,6 @@ it('accepts, verifies boarding, starts and completes a trip with replay-safe com
   await acceptConsents(driver);
   await acceptConsents(rider);
   try {
-    await acceptLocationConsents(driver);
-    await acceptLocationConsents(rider);
     const departureAt = Date.now() + 60_000;
     const tripResponse = await request('/api/v1/trips', {
       method: 'POST', ...driver, key: crypto.randomUUID(),
@@ -550,16 +540,8 @@ it('accepts, verifies boarding, starts and completes a trip with replay-safe com
     expect(boarded.status).toBe(200);
     expect((await boarded.json() as { data: unknown }).data).toMatchObject({ status: 'BOARDED', version: 3 });
 
-    for (const [session, requestIdForLocation, lat, sequence] of [
-      [driver, null, 37.5, 1], [rider, requestId, 37.51, 1],
-    ] as const) {
-      const uploaded = await request('/api/v1/locations/me', {
-        method: 'PUT', ...session,
-        body: { tripId: createdTripId, requestId: requestIdForLocation, lat, lng: 127, accuracyM: 8,
-          capturedAt: Date.now(), sequence },
-      });
-      expect(uploaded.status).toBe(200);
-    }
+    expect((await request('/api/v1/locations/me', { cookie: driver.cookie })).status).toBe(404);
+    expect((await request('/api/v1/locations/me', { method: 'PUT', ...rider })).status).toBe(404);
 
     await env.DB.prepare('UPDATE trips SET departure_at=?,expires_at=? WHERE id=?')
       .bind(Date.now() - 1, Date.now() + 900_000, createdTripId).run();

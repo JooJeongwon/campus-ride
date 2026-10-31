@@ -12,7 +12,9 @@
     "aliases": { "cs": "CS", "computing": "CS", "design": "DESIGN" }
   },
   "stops": [
-    { "name": "가상 교문", "kind": "GATE", "lat": 0, "lng": 0 },
+    { "name": "AI공학관", "kind": "GATE", "lat": 0, "lng": 0 },
+    { "name": "중앙도서관", "kind": "GATE", "lat": 0, "lng": 0 },
+    { "name": "반도체대학", "kind": "GATE", "lat": 0, "lng": 0 },
     { "name": "가상 캠퍼스", "kind": "DESTINATION", "lat": 0.001, "lng": 0.001 }
   ]
 }

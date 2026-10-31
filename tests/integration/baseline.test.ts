@@ -15,10 +15,10 @@ it('serves safe health and JSON errors through the Worker runtime', async () => 
   expect(health.headers.get('Cache-Control')).toBe('no-store');
   expect(health.headers.get('Content-Security-Policy')).toContain("default-src 'self'");
   expect(health.headers.get('Content-Security-Policy')).toContain("frame-ancestors 'none'");
-  expect(health.headers.get('Content-Security-Policy')).toContain('script-src \'self\' https://oapi.map.naver.com');
-  expect(health.headers.get('Content-Security-Policy')).toContain('img-src \'self\' https://*.map.naver.com https://*.map.naver.net');
+  expect(health.headers.get('Content-Security-Policy')).toContain("script-src 'self'");
+  expect(health.headers.get('Content-Security-Policy')).toContain("img-src 'self'");
   expect(health.headers.get('Content-Security-Policy')).toContain("style-src-attr 'unsafe-inline'");
-  expect(health.headers.get('Permissions-Policy')).toContain('geolocation=(self)');
+  expect(health.headers.get('Permissions-Policy')).toContain('geolocation=()');
   expect(health.headers.get('X-Content-Type-Options')).toBe('nosniff');
   for (const path of ['/api', '/api/unknown', '/api/v1/missing']) {
     const missing = await exports.default.fetch(`http://localhost${path}`);
@@ -49,9 +49,9 @@ it('keeps unimplemented domain APIs closed and requires auth for trip APIs', asy
   expect((await exports.default.fetch('http://localhost/api/v1/reports', { method: 'GET' })).status).toBe(404);
   expect((await exports.default.fetch('http://localhost/api/v1/me/reportable-requests')).status).toBe(401);
   expect((await exports.default.fetch('http://localhost/api/v1/admin/reports')).status).toBe(401);
-  expect((await exports.default.fetch('http://localhost:8787/api/v1/locations/me', { headers: { Cookie: 'campus_session=forged' } })).status).toBe(401);
-  expect((await exports.default.fetch('http://localhost:8787/api/v1/locations/me', { method: 'PUT', headers: { Cookie: 'campus_session=forged' } })).status).toBe(401);
-  expect((await exports.default.fetch('http://localhost:8787/api/v1/trips/50000000-0000-4000-8000-000000000001/locations')).status).toBe(401);
+  expect((await exports.default.fetch('http://localhost:8787/api/v1/locations/me', { headers: { Cookie: 'campus_session=forged' } })).status).toBe(404);
+  expect((await exports.default.fetch('http://localhost:8787/api/v1/locations/me', { method: 'PUT', headers: { Cookie: 'campus_session=forged' } })).status).toBe(404);
+  expect((await exports.default.fetch('http://localhost:8787/api/v1/trips/50000000-0000-4000-8000-000000000001/locations')).status).toBe(404);
   expect((await exports.default.fetch('http://localhost/api/v1/requests/id', { headers: { Cookie: 'campus_session=forged' } })).status).toBe(401);
   expect((await exports.default.fetch('http://localhost/api/v1/requests/00000000-0000-4000-8000-000000000001', { headers: { Cookie: 'campus_session=forged' } })).status).toBe(401);
   expect((await exports.default.fetch('http://localhost/api/v1/routes')).status).toBe(401);

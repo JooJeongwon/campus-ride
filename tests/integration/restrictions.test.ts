@@ -4,7 +4,7 @@ import { cleanupExpiredData } from '../../src/worker/jobs/cleanup';
 import { csrfToken, sha256 } from '../../src/worker/auth/session';
 
 const origin = 'http://localhost:8787';
-const routeId = '40000000-0000-4000-8000-000000000001';
+const routeId = '40000000-0000-4000-8000-000000000002';
 const departmentId = '10000000-0000-4000-8000-000000000001';
 type Session = { cookie: string; csrf: string };
 
@@ -44,14 +44,10 @@ async function sessionFor(userId: string): Promise<Session> {
   return { cookie: `campus_session=${token}`, csrf };
 }
 
-async function grantConsents(session: Session, location = false) {
-  const kinds = location
-    ? ['TERMS', 'PRIVACY', 'LOCATION_COLLECTION', 'LOCATION_SHARING']
-    : ['TERMS', 'PRIVACY'];
-  for (const kind of kinds) {
-    const policyVersion = kind.startsWith('LOCATION_') ? 'local-location-v1' : 'local-demo-v1';
+async function grantConsents(session: Session) {
+  for (const kind of ['TERMS', 'PRIVACY']) {
     expect((await request('/api/v1/me/consents', {
-      method: 'POST', ...session, body: { kind, policyVersion, granted: true },
+      method: 'POST', ...session, body: { kind, policyVersion: 'local-demo-v1', granted: true },
     })).status).toBe(200);
   }
 }
@@ -80,7 +76,7 @@ async function cleanup(users: string[], tripIds: string[], requestIds: string[])
   await env.DB.prepare('DELETE FROM users WHERE id IN (' + users.map(() => '?').join(',') + ')').bind(...users).run();
 }
 
-it('suspends a student, revokes sessions and aborts a boarded trip with its locations', async () => {
+it('suspends a student, revokes sessions and aborts a boarded trip without locations', async () => {
   const now = Date.now();
   const adminId = crypto.randomUUID();
   const driverId = crypto.randomUUID();
@@ -99,7 +95,7 @@ it('suspends a student, revokes sessions and aborts a boarded trip with its loca
     const admin = await sessionFor(adminId);
     const driver = await sessionFor(driverId);
     const rider = await sessionFor(riderId);
-    await Promise.all([grantConsents(admin), grantConsents(driver, true), grantConsents(rider, true)]);
+    await Promise.all([grantConsents(admin), grantConsents(driver), grantConsents(rider)]);
 
     const departureAt = Date.now() + 600_000;
     const createdTrip = await request('/api/v1/trips', {
@@ -124,14 +120,8 @@ it('suspends a student, revokes sessions and aborts a boarded trip with its loca
     expect((await request(`/api/v1/requests/${requestId}/board`, {
       method: 'POST', ...driver, body: { expectedVersion: 2, code },
     })).status).toBe(200);
-    for (const [session, ownRequestId] of [[driver, null], [rider, requestId]] as const) {
-      expect((await request('/api/v1/locations/me', {
-        method: 'PUT', ...session, body: {
-          tripId, requestId: ownRequestId, lat: 0.0001, lng: 0.0001, accuracyM: 10,
-          capturedAt: Date.now(), sequence: 1,
-        },
-      })).status).toBe(200);
-    }
+    expect((await request('/api/v1/locations/me', { cookie: driver.cookie, method: 'PUT' })).status).toBe(404);
+    expect((await request('/api/v1/locations/me', { cookie: rider.cookie })).status).toBe(404);
 
     expect((await request(`/api/v1/admin/users/${driverId}/suspend`, {
       method: 'POST', cookie: admin.cookie, body: { reason: '관리자 확인 전용 테스트' },

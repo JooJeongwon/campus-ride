@@ -4,7 +4,7 @@ import { expect, it } from 'vitest';
 const origin = 'http://localhost:8787';
 const driverId = '20000000-0000-4000-8000-000000000001';
 const riderId = '20000000-0000-4000-8000-000000000002';
-const routeId = '40000000-0000-4000-8000-000000000001';
+const routeId = '40000000-0000-4000-8000-000000000002';
 const profile = { vehicleModel: '합성 세단', vehicleColor: '회색', vehicleIdentifier: 'SYNTHETIC-TRIP', passengerCapacity: 2 };
 
 async function request(path: string, options: { method?: string; cookie?: string; csrf?: string; key?: string; body?: unknown } = {}) {
@@ -97,7 +97,7 @@ it('creates, reads and idempotently locks an authorized driver trip', async () =
     const me = await request('/api/v1/me', { cookie: rider.cookie });
     const meData = (await me.json() as { data: { activeActivity: { role: string; tripId: string }; activeTrip: { id: string; originName: string; destinationName: string; remainingSeats: number } } }).data;
     expect(meData.activeActivity).toMatchObject({ role: 'DRIVER', tripId: firstData.id });
-    expect(meData.activeTrip).toMatchObject({ id: firstData.id, originName: '가상 교문', destinationName: '가상 캠퍼스', remainingSeats: 2 });
+    expect(meData.activeTrip).toMatchObject({ id: firstData.id, originName: 'AI공학관', destinationName: '가상 캠퍼스', remainingSeats: 2 });
     const detail = await request(`/api/v1/trips/${firstData.id}`, { cookie: rider.cookie });
     expect(detail.status).toBe(200);
     expect(await detail.text()).not.toContain(profile.vehicleIdentifier);

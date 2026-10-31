@@ -4,7 +4,7 @@ import { csrfToken, sha256 } from '../../src/worker/auth/session';
 
 const origin = 'http://localhost:8787';
 const riderId = '20000000-0000-4000-8000-000000000002';
-const routeId = '40000000-0000-4000-8000-000000000001';
+const routeId = '40000000-0000-4000-8000-000000000002';
 const departmentId = '10000000-0000-4000-8000-000000000001';
 
 async function request(path: string, options: { method?: string; cookie?: string; csrf?: string; key?: string; body?: unknown } = {}) {
@@ -151,7 +151,7 @@ it('audits a peer block, ends the active relation, and does not reopen it on unb
   }
 });
 
-it('aborts a boarded trip and deletes both parties’ locations after a block', async () => {
+it('aborts a boarded trip after a block without collecting locations', async () => {
   const now = Date.now();
   const driverId = crypto.randomUUID();
   const riderSession = await login();
@@ -170,8 +170,8 @@ it('aborts a boarded trip and deletes both parties’ locations after a block', 
     await env.DB.prepare(`INSERT INTO driver_profiles
       (user_id,vehicle_model,vehicle_color,vehicle_identifier,passenger_capacity,verification_status,verified_until,checked_at)
       VALUES(?,'가상 차량','회색','TEST-ONLY',2,'VERIFIED',?,?)`).bind(driverId, now + 86_400_000, now).run();
-    await acceptConsents(riderSession, ['TERMS', 'PRIVACY', 'LOCATION_COLLECTION', 'LOCATION_SHARING']);
-    await acceptConsents(driverSession, ['TERMS', 'PRIVACY', 'LOCATION_COLLECTION', 'LOCATION_SHARING']);
+    await acceptConsents(riderSession, ['TERMS', 'PRIVACY']);
+    await acceptConsents(driverSession, ['TERMS', 'PRIVACY']);
 
     const createdTrip = await request('/api/v1/trips', {
       method: 'POST', ...driverSession, key: crypto.randomUUID(),
@@ -195,14 +195,8 @@ it('aborts a boarded trip and deletes both parties’ locations after a block', 
     expect((await request(`/api/v1/requests/${requestId}/board`, {
       method: 'POST', ...driverSession, body: { expectedVersion: 2, code },
     })).status).toBe(200);
-    for (const [session, ownRequestId] of [[riderSession, requestId], [driverSession, null]] as const) {
-      expect((await request('/api/v1/locations/me', {
-        method: 'PUT', ...session, body: {
-          tripId, requestId: ownRequestId, lat: 37.5, lng: 127, accuracyM: 8,
-          capturedAt: Date.now(), sequence: 1,
-        },
-      })).status).toBe(200);
-    }
+    expect((await request('/api/v1/locations/me', { cookie: riderSession.cookie })).status).toBe(404);
+    expect((await request('/api/v1/locations/me', { cookie: driverSession.cookie, method: 'PUT' })).status).toBe(404);
     const peers = await request('/api/v1/me/active-peers', { cookie: riderSession.cookie });
     expect((await peers.json() as { data: Array<{ userId: string }> }).data)
       .toContainEqual(expect.objectContaining({ userId: driverId }));

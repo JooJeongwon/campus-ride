@@ -4,8 +4,6 @@ import { healthResponse } from '../shared/api';
 import { devLoginSchema, driverProfileDecisionSchema, driverProfileSchema, profileUpdateSchema, verificationDecisionSchema } from '../shared/auth';
 import { adminRouteCreateSchema, adminRouteUpdateSchema, adminStopSchema } from '../shared/admin';
 import { reportCreateSchema, suspendUserSchema } from '../shared/moderation';
-import { isLocationFresh, projectVirtualMap } from './location-map';
-import { loadNaverMaps, type NaverMap, type NaverOverlay, type NaverMaps } from './naver-map';
 import { rideRequestCreateSchema, tripCreateSchema, tripSearchResponseSchema, tripSearchSchema, type TripMatch, type TripSearchInput } from '../shared/trips';
 import './style.css';
 
@@ -16,189 +14,9 @@ function seoulDateTimeInput(timestamp: number) {
   }).format(new Date(timestamp)).replace(' ', 'T');
 }
 
-function locationFreshness(receivedAt: number) {
-  return Date.now() - receivedAt > 30_000 ? '위치 갱신 중단' : `${new Date(receivedAt).toLocaleTimeString('ko-KR')}에 갱신`;
-}
-
-type ConsentKind = 'TERMS' | 'PRIVACY' | 'LOCATION_COLLECTION' | 'LOCATION_SHARING';
+type ConsentKind = 'TERMS' | 'PRIVACY';
 type ConsentState = { version: string; url: string | null; accepted: boolean };
-type LocationPoint = {
-  key: string; nickname: string; role: 'DRIVER' | 'RIDER'; lat: number; lng: number; accuracyM: number;
-  capturedAt: number; receivedAt: number; expiresAt: number; sequence: number;
-};
-type LocationDisclosure = {
-  id: string; recipientNickname: string; recipientRole: 'DRIVER' | 'RIDER'; purpose: 'MEETING'; requestedAt: number;
-  providedAt: number | null; noticeAcknowledgedAt: number | null; postNoticeAcknowledgedAt: number | null;
-};
 
-function VirtualLocationMap({
-  stop,
-  own,
-  shared,
-}: {
-  stop: { name: string; lat: number; lng: number };
-  own: Omit<LocationPoint, 'nickname' | 'role' | 'key'> | null;
-  shared: LocationPoint[];
-}) {
-  const markers = [
-    ...(own && isLocationFresh(own.receivedAt) ? [{
-      id: 'self', label: '내 위치', kind: 'self' as const,
-      lat: own.lat, lng: own.lng, accuracyM: own.accuracyM,
-    }] : []),
-    ...shared.filter((point) => isLocationFresh(point.receivedAt)).map((point) => ({
-      id: point.key,
-      label: point.role === 'DRIVER' ? '운전자 위치' : `${point.nickname} 위치`,
-      kind: 'peer' as const, lat: point.lat, lng: point.lng, accuracyM: point.accuracyM,
-    })),
-  ];
-  const points = projectVirtualMap(stop, markers);
-
-  return <figure className="virtual-map">
-    <svg viewBox="0 0 320 220" role="img" aria-labelledby="virtual-map-title" aria-describedby="virtual-map-description">
-      <title id="virtual-map-title">가상 위치도</title>
-      <desc id="virtual-map-description">지정 승차 지점과 30초 이내에 갱신된 위치 및 정확도 범위입니다. 실제 도로, 경로, 거리 안내는 아닙니다.</desc>
-      <rect className="virtual-map__surface" x="18" y="22" width="284" height="176" rx="12" />
-      <path className="virtual-map__grid" d="M18 66H302 M18 110H302 M18 154H302 M89 22V198 M160 22V198 M231 22V198" />
-      {points.map((point) => point.kind === 'stop'
-        ? <rect key={point.id} className="virtual-map__stop" x={point.x - 6} y={point.y - 6} width="12" height="12" rx="2">
-          <title>{point.label}: {stop.name}</title>
-        </rect>
-        : <g key={point.id} className={`virtual-map__marker virtual-map__marker--${point.kind}`}>
-          <circle className="virtual-map__accuracy" cx={point.x} cy={point.y} r={point.radius} />
-          <circle className="virtual-map__dot" cx={point.x} cy={point.y} r="5" />
-          <title>{point.label} · 오차 ±{Math.round(point.accuracyM)}m</title>
-        </g>)}
-    </svg>
-    <ul className="virtual-map__legend" aria-label="위치도 표시 항목">
-      <li><span className="virtual-map__swatch virtual-map__swatch--stop" aria-hidden="true" />{stop.name}</li>
-      {markers.map((marker) => <li key={marker.id}>
-        <span className={`virtual-map__swatch virtual-map__swatch--${marker.kind}`} aria-hidden="true" />{marker.label}
-      </li>)}
-    </ul>
-    <figcaption>현재 좌표를 승차 지점 기준으로 표시합니다. 실제 도로·경로·거리 안내가 아닙니다.</figcaption>
-  </figure>;
-}
-function NaverLocationMap({
-  clientId,
-  stop,
-  own,
-  shared,
-}: {
-  clientId: string;
-  stop: { name: string; lat: number; lng: number };
-  own: Omit<LocationPoint, 'nickname' | 'role' | 'key'> | null;
-  shared: LocationPoint[];
-}) {
-  const mapElement = useRef<HTMLDivElement>(null);
-  const map = useRef<NaverMap | null>(null);
-  const overlays = useRef<NaverOverlay[]>([]);
-  const center = useRef<{ lat: number; lng: number } | null>(null);
-  const [status, setStatus] = useState('네이버 지도를 불러오는 중');
-  const [maps, setMaps] = useState<NaverMaps | null>(null);
-  const markers = [
-    ...(own && isLocationFresh(own.receivedAt) ? [{
-      id: 'self', label: '내 위치', kind: 'self' as const, lat: own.lat, lng: own.lng, accuracyM: own.accuracyM,
-    }] : []),
-    ...shared.filter((point) => isLocationFresh(point.receivedAt)).map((point) => ({
-      id: point.key,
-      label: point.role === 'DRIVER' ? '운전자 위치' : `${point.nickname} 위치`,
-      kind: 'peer' as const, lat: point.lat, lng: point.lng, accuracyM: point.accuracyM,
-    })),
-  ];
-  const markersRef = useRef(markers);
-  markersRef.current = markers;
-  const markersKey = JSON.stringify(markers);
-
-  useEffect(() => {
-    let active = true;
-    const authFailure = () => {
-      overlays.current.forEach((overlay) => overlay.setMap(null));
-      overlays.current = [];
-      map.current = null;
-      setMaps(null);
-      setStatus('네이버 지도 인증에 실패했습니다. Client ID와 등록 도메인을 확인해 주세요.');
-    };
-    window.addEventListener('naver-map-auth-failure', authFailure);
-    void loadNaverMaps(clientId).then((sdk) => {
-      if (!active || !mapElement.current) return;
-      map.current = new sdk.Map(mapElement.current, {
-        center: new sdk.LatLng(stop.lat, stop.lng),
-        zoom: 16,
-      });
-      center.current = { lat: stop.lat, lng: stop.lng };
-      setMaps(sdk);
-      setStatus('');
-    }).catch(() => {
-      if (active) setStatus('네이버 지도를 불러오지 못했습니다. 연결 상태와 Client ID를 확인해 주세요.');
-    });
-    return () => {
-      active = false;
-      window.removeEventListener('naver-map-auth-failure', authFailure);
-      overlays.current.forEach((overlay) => overlay.setMap(null));
-      overlays.current = [];
-      map.current = null;
-      center.current = null;
-    };
-  }, [clientId]);
-
-  useEffect(() => {
-    if (!maps || !map.current) return;
-    if (center.current?.lat !== stop.lat || center.current.lng !== stop.lng) {
-      map.current.setCenter(new maps.LatLng(stop.lat, stop.lng));
-      center.current = { lat: stop.lat, lng: stop.lng };
-    }
-    overlays.current.forEach((overlay) => overlay.setMap(null));
-    const nextOverlays: NaverOverlay[] = [];
-    const stopPosition = new maps.LatLng(stop.lat, stop.lng);
-    nextOverlays.push(new maps.Marker({
-      map: map.current,
-      position: stopPosition,
-      title: `지정 승차 지점: ${stop.name}`,
-      zIndex: 100,
-    }));
-    for (const marker of markersRef.current) {
-      const position = new maps.LatLng(marker.lat, marker.lng);
-      const color = marker.kind === 'self' ? '#2876b8' : '#2c8062';
-      nextOverlays.push(new maps.Circle({
-        map: map.current,
-        center: position,
-        radius: marker.accuracyM,
-        fillColor: color,
-        fillOpacity: 0.18,
-        strokeColor: color,
-        strokeOpacity: 0.5,
-        strokeWeight: 1,
-        clickable: false,
-      }));
-      nextOverlays.push(new maps.Marker({
-        map: map.current,
-        position,
-        title: `${marker.label} · 오차 ±${Math.round(marker.accuracyM)}m`,
-      }));
-    }
-    overlays.current = nextOverlays;
-    return () => nextOverlays.forEach((overlay) => overlay.setMap(null));
-  }, [maps, stop.lat, stop.lng, stop.name, markersKey]);
-
-  if (status && status !== '네이버 지도를 불러오는 중') {
-    return <>
-      <p role="status">{status} 가상 위치도를 대신 표시합니다.</p>
-      <VirtualLocationMap stop={stop} own={own} shared={shared} />
-    </>;
-  }
-
-  return <figure className="naver-map">
-    <div ref={mapElement} className="naver-map__canvas" role="region" aria-label="네이버 동승 위치 지도" tabIndex={0} />
-    {status && <p className="naver-map__status" role="status">{status}</p>}
-    <ul className="virtual-map__legend" aria-label="지도 표시 항목">
-      <li><span className="virtual-map__swatch virtual-map__swatch--stop" aria-hidden="true" />{stop.name}</li>
-      {markers.map((marker) => <li key={marker.id}>
-        <span className={`virtual-map__swatch virtual-map__swatch--${marker.kind}`} aria-hidden="true" />{marker.label} · 오차 ±{Math.round(marker.accuracyM)}m
-      </li>)}
-    </ul>
-    <figcaption>지도는 지정 승차 지점 중심입니다. 위치는 30초가 지나면 지도에서 숨깁니다.</figcaption>
-  </figure>;
-}
 type Profile = {
   id: string; nickname: string; gender: string; role: 'STUDENT' | 'ADMIN';
   affiliation: { status: string; verifiedUntil: number | null };
@@ -247,20 +65,11 @@ function App() {
   const [boardingCodes, setBoardingCodes] = useState<Record<string, { code: string; expiresAt: number }>>({});
   const [message, setMessage] = useState('');
   const [consentBusy, setConsentBusy] = useState(false);
-  const [locationStarted, setLocationStarted] = useState(false);
-  const [locationStatus, setLocationStatus] = useState('');
-  const [ownLocation, setOwnLocation] = useState<Omit<LocationPoint, 'nickname' | 'role' | 'key'> | null>(null);
-  const [sharedLocations, setSharedLocations] = useState<LocationPoint[]>([]);
-  const [locationDisclosures, setLocationDisclosures] = useState<LocationDisclosure[]>([]);
-  const [locationStop, setLocationStop] = useState<{ name: string; lat: number; lng: number } | null>(null);
   const [tripBusy, setTripBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const tripIdempotency = useRef<{ body: string; key: string } | null>(null);
   const reportKeys = useRef(new Map<string, string>());
   const commandKeys = useRef(new Map<string, string>());
-  const locationWatch = useRef<number | null>(null);
-  const locationSequence = useRef(0);
-  const lastLocationUpload = useRef(0);
   async function refreshMe(revision = profileRevision.current) {
     const response = await fetch('/api/v1/me', { cache: 'no-store' });
     if (!response.ok) return null;
@@ -353,7 +162,7 @@ function App() {
       ? { active: form.get('active') === 'on' }
       : { originStopId: String(form.get('originStopId') ?? ''), destinationStopId: String(form.get('destinationStopId') ?? '') };
     const input = schema.safeParse(body);
-    if (!input.success) { setMessage('활성 교문과 목적지를 확인해 주세요.'); return; }
+    if (!input.success) { setMessage('활성 승차 지점과 목적지를 확인해 주세요.'); return; }
     setActionBusy(true);
     try {
       const response = await fetch(path, {
@@ -496,12 +305,7 @@ function App() {
       });
       const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
       if (!response.ok) { setMessage(payload?.error?.message ?? '사용자를 차단하지 못했습니다.'); return; }
-      const updated = await refreshMe();
-      if (!updated?.activeActivity) {
-        stopLocationWatch();
-        setOwnLocation(null);
-        setSharedLocations([]);
-      }
+      await refreshMe();
       await Promise.all([refreshBlocks(), refreshReportableRequests(), refreshActivePeers()]);
       setMessage('사용자를 차단했습니다. 종료된 동승 관계는 차단 해제 후에도 복구되지 않습니다.');
     } catch {
@@ -804,15 +608,6 @@ function App() {
       if (revision !== profileRevision.current) return;
       setProfile(updatedProfile);
       setMessage(granted ? '동의 상태를 저장했습니다.' : '동의를 철회했습니다.');
-      if (!granted && kind.startsWith('LOCATION_')) {
-        setLocationDisclosures([]);
-        if (locationWatch.current !== null) navigator.geolocation?.clearWatch(locationWatch.current);
-        locationWatch.current = null;
-        setLocationStarted(false);
-        setOwnLocation(null);
-        setSharedLocations([]);
-        setLocationStatus('위치 동의를 철회했습니다. 공유 위치를 삭제했습니다.');
-      }
     } catch {
       if (revision === profileRevision.current) {
         setProfile(profile);
@@ -822,128 +617,20 @@ function App() {
       if (revision === profileRevision.current) setConsentBusy(false);
     }
   }
-  function stopLocationWatch() {
-    if (locationWatch.current !== null) navigator.geolocation?.clearWatch(locationWatch.current);
-    locationWatch.current = null;
-    setLocationStarted(false);
-  }
-  async function startLocationSharing(context: { tripId: string; requestId: string | null }) {
-    if (!profile || locationWatch.current !== null) return;
-    const revision = profileRevision.current;
-    if (!profile.requiredConsents.LOCATION_COLLECTION.accepted || !profile.requiredConsents.LOCATION_SHARING.accepted) {
-      setLocationStatus('위치 수집과 상대 제공에 각각 동의한 뒤 시작해 주세요.');
-      return;
-    }
-    if (!navigator.geolocation) {
-      setLocationStatus('이 브라우저는 위치 기능을 지원하지 않습니다. 지정 승차 지점에서 만나 탑승 코드를 사용해 주세요.');
-      return;
-    }
-    if (document.hidden) {
-      setLocationStatus('화면을 열어 둔 상태에서 위치 공유를 시작해 주세요.');
-      return;
-    }
-    try {
-      const current = await fetch('/api/v1/locations/me', { cache: 'no-store' });
-      const latest = await current.json().catch(() => null) as { data?: { sequence: number } } | null;
-      if (!current.ok || !latest?.data) throw new Error('location context unavailable');
-      if (revision !== profileRevision.current) return;
-      locationSequence.current = latest.data.sequence;
-      lastLocationUpload.current = 0;
-      setLocationStatus('브라우저 위치 권한을 확인하고 있습니다.');
-      const watchId = navigator.geolocation.watchPosition(async (position) => {
-        if (locationWatch.current === null || document.hidden || Date.now() - lastLocationUpload.current < 10_000) return;
-        const capturedAt = Math.round(position.timestamp);
-        const sequence = ++locationSequence.current;
-        const receivedAt = Date.now();
-        lastLocationUpload.current = receivedAt;
-        const point = {
-          lat: position.coords.latitude, lng: position.coords.longitude, accuracyM: position.coords.accuracy,
-          capturedAt, receivedAt, expiresAt: receivedAt + 60_000, sequence,
-        };
-        setOwnLocation(point);
-        try {
-          const response = await fetch('/api/v1/locations/me', {
-            method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': profile.csrfToken },
-            body: JSON.stringify({ tripId: context.tripId, requestId: context.requestId,
-              lat: point.lat, lng: point.lng, accuracyM: point.accuracyM, capturedAt, sequence }),
-          });
-          if (!response.ok) {
-            const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
-            setLocationStatus(payload?.error?.message ?? '위치를 공유하지 못했습니다. 지정 지점과 탑승 코드를 사용해 주세요.');
-            if (response.status === 403 || response.status === 409) stopLocationWatch();
-            return;
-          }
-          setLocationStatus(position.coords.accuracy > 100
-            ? '위치 오차가 커 정확한 만남에는 적합하지 않습니다. 지정 승차 지점에서 만나 주세요.'
-            : position.coords.accuracy > 50
-              ? '위치 오차가 있습니다. 지정 승차 지점에서 만나 주세요.'
-              : '위치를 갱신했습니다. 동승 상대에게 실제 제공되면 제공 내역을 여기에 표시합니다.');
-        } catch {
-          setLocationStatus('연결이 끊겨 위치를 전송하지 못했습니다. 지정 승차 지점에서 만나 주세요.');
-        }
-      }, (error) => {
-        const message = error.code === error.PERMISSION_DENIED
-          ? '위치 권한이 거절되었습니다. 지정 승차 지점에서 만나 탑승 코드를 사용해 주세요.'
-          : error.code === error.TIMEOUT
-            ? '위치를 제때 가져오지 못했습니다. 다시 시도하거나 지정 승차 지점을 이용해 주세요.'
-            : '현재 위치를 가져오지 못했습니다. 지정 승차 지점에서 만나 주세요.';
-        stopLocationWatch();
-        setLocationStatus(message);
-      }, { enableHighAccuracy: true, timeout: 10_000, maximumAge: 5_000 });
-      locationWatch.current = watchId;
-      setLocationStarted(true);
-    } catch {
-      setLocationStatus('위치 공유 관계를 확인하지 못했습니다. 새로고침 후 다시 시도해 주세요.');
-    }
-  }
-  async function acknowledgeLocationDisclosure(disclosure: LocationDisclosure) {
-    if (!profile || actionBusy) return;
-    const revision = profileRevision.current;
-    setActionBusy(true);
-    try {
-      const response = await fetch('/api/v1/locations/me/disclosures/ack', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': profile.csrfToken },
-        body: JSON.stringify({ disclosureIds: [disclosure.id] }),
-      });
-      const payload = await response.json().catch(() => null) as {
-        data?: { acknowledgedAt: number; disclosureIds: string[] }; error?: { message?: string };
-      } | null;
-      if (revision !== profileRevision.current) return;
-      if (!response.ok || !payload?.data?.disclosureIds.includes(disclosure.id)) {
-        setMessage(payload?.error?.message ?? '위치 안내 확인을 저장하지 못했습니다. 내역을 새로고침해 주세요.');
-        return;
-      }
-      const acknowledgedAt = payload.data.acknowledgedAt;
-      setLocationDisclosures((current) => current.map((item) => item.id !== disclosure.id ? item : item.providedAt === null
-        ? { ...item, noticeAcknowledgedAt: acknowledgedAt }
-        : { ...item, postNoticeAcknowledgedAt: acknowledgedAt }));
-      setMessage('위치 안내 확인을 기록했습니다.');
-    } catch {
-      if (revision === profileRevision.current) setMessage('연결이 끊겨 위치 안내 확인을 저장하지 못했습니다. 내역을 새로고침해 주세요.');
-    } finally {
-      if (revision === profileRevision.current) setActionBusy(false);
-    }
-  }
   async function logout() {
     if (!profile) return;
     const revision = profileRevision.current;
     await fetch('/api/v1/auth/logout', { method: 'POST', headers: { 'X-CSRF-Token': profile.csrfToken } });
     if (revision !== profileRevision.current) return;
     profileRevision.current += 1;
-    stopLocationWatch();
-    stopLocationWatch();
     setProfile(null);
     setTripRequests([]);
     setConsentBusy(false);
     setTripBusy(false);
-    setOwnLocation(null);
-    setSharedLocations([]);
-    setLocationDisclosures([]);
-    setLocationStop(null);
     setMessage('로그아웃했습니다.');
   }
   async function deleteAccount() {
-    if (!profile || actionBusy || !window.confirm('계정을 탈퇴할까요? 직접 식별정보와 현재 위치를 정리하고 진행 중 운행·요청을 종료합니다. 일부 운행·신고·동의·위치 확인 기록은 정해진 기간 보관됩니다. D1의 7일 복구 창 안에 삭제 전 정보가 되살아날 수 있어 복구 시 탈퇴 기록을 다시 적용합니다.')) return;
+    if (!profile || actionBusy || !window.confirm('계정을 탈퇴할까요? 직접 식별정보를 정리하고 진행 중 운행·요청을 종료합니다. 일부 운행·신고·동의 기록은 정해진 기간 보관됩니다. D1 복구 창 안에 삭제 전 정보가 되살아날 수 있어 복구 시 탈퇴 기록을 다시 적용합니다.')) return;
     const revision = profileRevision.current;
     setActionBusy(true);
     try {
@@ -957,8 +644,7 @@ function App() {
       }
       if (revision !== profileRevision.current) return;
       profileRevision.current += 1;
-      stopLocationWatch();
-      setProfile(null); setTripRequests([]); setOwnLocation(null); setSharedLocations([]); setLocationDisclosures([]); setLocationStop(null);
+      setProfile(null); setTripRequests([]);
       setBoardingCodes({});
       setMessage('계정 탈퇴를 처리했습니다. 연결된 일부 기록은 정해진 기간 보관되며 D1 복구 창에서는 삭제 전 상태가 복원될 수 있습니다.');
     } catch {
@@ -975,17 +661,9 @@ function App() {
   const canCreateTrip = Boolean(canRegisterDriver && profile?.driverProfile?.verificationStatus === 'VERIFIED'
     && (profile.driverProfile.verifiedUntil ?? 0) > Date.now() && !hasBlockingActivity);
   const canRequestRide = Boolean(canRegisterDriver && !hasBlockingActivity);
-  const locationConsented = Boolean(profile?.requiredConsents.LOCATION_COLLECTION.accepted
-    && profile.requiredConsents.LOCATION_SHARING.accepted);
-  const activeLocationContext = profile?.activeActivity?.role === 'DRIVER'
-    && profile.activeTrip?.status === 'OPEN'
-    && tripRequests.some((item) => item.status === 'ACCEPTED' || item.status === 'BOARDED')
-    ? { tripId: profile.activeTrip.id, requestId: null as string | null }
-    : profile?.activeActivity?.role === 'RIDER' && profile.activeRequest
-      && profile.activeRequest.tripStatus === 'OPEN'
-      && (profile.activeRequest.status === 'ACCEPTED' || profile.activeRequest.status === 'BOARDED')
-      ? { tripId: profile.activeRequest.tripId, requestId: profile.activeRequest.id }
-      : null;
+  const waitingPoint = profile?.activeActivity?.role === 'DRIVER'
+    ? profile.activeTrip?.originName
+    : profile?.activeRequest?.originName;
   const tripDepartureMin = seoulDateTimeInput(Math.ceil(Date.now() / 60_000) * 60_000);
   const tripDepartureMax = seoulDateTimeInput(Date.now() + 30 * 60_000);
   useEffect(() => {
@@ -1052,105 +730,10 @@ function App() {
     const timer = window.setInterval(() => { void poll(); }, 5_000);
     return () => { stopped = true; window.clearInterval(timer); controller.abort(); };
   }, [profile?.activeActivity?.role, profile?.activeActivity?.requestId, profile?.activeTrip?.id, actionBusy]);
-  useEffect(() => {
-    const stopWhenHidden = () => {
-      if (!document.hidden) return;
-      if (locationWatch.current !== null) navigator.geolocation?.clearWatch(locationWatch.current);
-      locationWatch.current = null;
-      setLocationStarted(false);
-      setLocationStatus('화면이 숨겨져 위치 수집을 멈췄습니다. 돌아온 뒤 다시 시작해 주세요.');
-    };
-    document.addEventListener('visibilitychange', stopWhenHidden);
-    return () => {
-      document.removeEventListener('visibilitychange', stopWhenHidden);
-      if (locationWatch.current !== null) navigator.geolocation?.clearWatch(locationWatch.current);
-      locationWatch.current = null;
-    };
-  }, []);
-  useEffect(() => {
-    if (activeLocationContext && locationConsented) return;
-    stopLocationWatch();
-    setOwnLocation(null);
-    setSharedLocations([]);
-    setLocationStop(null);
-  }, [activeLocationContext?.tripId, activeLocationContext?.requestId, locationConsented, profile?.csrfToken]);
-  useEffect(() => {
-    setLocationDisclosures([]);
-    if (!profile?.id || !profile.requiredConsents.TERMS.accepted || !profile.requiredConsents.PRIVACY.accepted) return;
-    const revision = profileRevision.current;
-    const controller = new AbortController();
-    void fetch('/api/v1/locations/me', { signal: controller.signal, cache: 'no-store' })
-      .then(async (response) => {
-        if (!response.ok) return;
-        const data = (await response.json() as { data: { disclosures: LocationDisclosure[] } }).data;
-        if (!controller.signal.aborted && revision === profileRevision.current) setLocationDisclosures(data.disclosures);
-      }).catch(() => {});
-    return () => controller.abort();
-  }, [profile?.id, profile?.requiredConsents.TERMS.accepted, profile?.requiredConsents.PRIVACY.accepted]);
-  useEffect(() => {
-    if (!activeLocationContext || !locationConsented) return;
-    let stopped = false;
-    let running = false;
-    const revision = profileRevision.current;
-    let delay = 5_000;
-    let timer: number | null = null;
-    let controller: AbortController | null = null;
-    const poll = async () => {
-      if (stopped || running || document.hidden) return;
-      running = true;
-      controller = new AbortController();
-      try {
-        const [ownResponse, peerResponse] = await Promise.all([
-          fetch('/api/v1/locations/me', { signal: controller.signal, cache: 'no-store' }),
-          fetch(`/api/v1/trips/${activeLocationContext.tripId}/locations`, { signal: controller.signal, cache: 'no-store' }),
-        ]);
-        if (!ownResponse.ok || !peerResponse.ok) throw new Error('location unavailable');
-        const own = await ownResponse.json() as { data: { sequence: number; location: typeof ownLocation; disclosures: LocationDisclosure[] } };
-        const peers = await peerResponse.json() as { data: { stop: typeof locationStop; locations: LocationPoint[] } };
-        if (stopped || controller.signal.aborted || revision !== profileRevision.current) return;
-        locationSequence.current = Math.max(locationSequence.current, own.data.sequence);
-        setOwnLocation(own.data.location);
-        setLocationDisclosures(own.data.disclosures);
-        setLocationStop(peers.data.stop);
-        setSharedLocations((current) => {
-          const incomingKeys = new Set(peers.data.locations.map(({ key }) => key));
-          const retained = current.filter((point) => point.expiresAt > Date.now() && !incomingKeys.has(point.key));
-          return [...retained, ...peers.data.locations];
-        });
-        delay = 5_000;
-      } catch {
-        if (!controller.signal.aborted) {
-          delay = Math.min(delay * 2, 30_000);
-          setLocationStatus('위치 상태를 새로 확인하지 못했습니다. 최신 위치를 현재 위치로 간주하지 마세요.');
-        }
-      } finally {
-        running = false;
-        controller = null;
-        if (!stopped && !document.hidden) timer = window.setTimeout(() => void poll(), delay);
-      }
-    };
-    const visibilityChanged = () => {
-      if (document.hidden) {
-        if (timer !== null) window.clearTimeout(timer);
-        controller?.abort();
-      } else {
-        delay = 5_000;
-        void poll();
-      }
-    };
-    document.addEventListener('visibilitychange', visibilityChanged);
-    void poll();
-    return () => {
-      stopped = true;
-      document.removeEventListener('visibilitychange', visibilityChanged);
-      if (timer !== null) window.clearTimeout(timer);
-      controller?.abort();
-    };
-  }, [activeLocationContext?.tripId, activeLocationContext?.requestId, locationConsented]);
   return <main>
     <p className="eyebrow">CAMPUS RIDE / LOCAL DEVELOPMENT</p>
     <h1>함께 올라가는<br />캠퍼스의 시작.</h1>
-    <p>교문에서 캠퍼스까지, 학생들을 연결하는 동승 서비스입니다.</p>
+    <p>등록된 승차 지점에서 함께 이동할 학생들을 연결하는 동승 서비스입니다.</p>
     <section aria-labelledby="development-title">
       <h2 id="development-title">개발 환경 준비 중</h2>
       <p role="status">{status}</p>
@@ -1158,44 +741,18 @@ function App() {
         <h3>{profile.nickname}</h3>
         <p>학생 확인: {profile.affiliation.status} · 학과: {profile.department.status}</p>
         <section aria-labelledby="consent-title">
-          <h3 id="consent-title">약관·개인정보 확인과 위치 설정</h3>
-          <p>서비스 이용약관 확인과 개인정보 처리방침 확인이 필요합니다. 처리방침 확인은 별도의 개인정보 처리 동의를 대신하지 않습니다. 위치 수집과 동승 상대 제공은 각각 선택하며, 여기서 철회할 수 있습니다.</p>
-          {(['TERMS', 'PRIVACY', 'LOCATION_COLLECTION', 'LOCATION_SHARING'] as const).map((kind) => {
+          <h3 id="consent-title">약관·개인정보 확인</h3>
+          <p>서비스 이용약관 확인과 개인정보 처리방침 확인이 필요합니다. 처리방침 확인은 별도의 개인정보 처리 동의를 대신하지 않습니다. 현재는 단말 GPS를 수집하거나 동승 상대에게 실시간 좌표를 제공하지 않습니다.</p>
+          {(['TERMS', 'PRIVACY'] as const).map((kind) => {
             const policy = profile.requiredConsents[kind];
-            const title = kind === 'TERMS' ? '서비스 이용 약관'
-              : kind === 'PRIVACY' ? '개인정보 처리방침 확인'
-                : kind === 'LOCATION_COLLECTION' ? '내 위치를 임시 수집' : '내 위치를 동승 상대에게 제공';
+            const title = kind === 'TERMS' ? '서비스 이용 약관' : '개인정보 처리방침 확인';
             return <div className="consent-row" key={kind}>
               <label><input type="checkbox" checked={policy.accepted} disabled={consentBusy}
                 onChange={(event) => void updateConsent(kind, event.currentTarget.checked)} /> {title} ({policy.version})</label>
               {policy.url ? <a href={policy.url} target="_blank" rel="noreferrer">내용 보기</a>
-                : <p>{kind.startsWith('LOCATION_')
-                  ? '로컬 개발용 안내입니다. 실제 개인위치정보 처리 고지나 법적 동의 문구가 아닙니다.'
-                  : '로컬 개발용 동의 체험입니다. 실제 약관이나 개인정보 처리 안내가 아니며 합성 계정만 사용합니다.'}</p>}
+                : <p>로컬 개발용 확인입니다. 실제 약관이나 개인정보 처리 안내가 아니며 합성 계정만 사용합니다.</p>}
             </div>;
           })}
-          <h4>내 위치 제공 내역</h4>
-          {locationDisclosures.length ? <ul aria-label="내 위치 제공 내역">
-            {locationDisclosures.map((disclosure) => {
-              const recipientRole = disclosure.recipientRole === 'DRIVER' ? '운전자' : '탑승자';
-              const needsPreNoticeAck = disclosure.providedAt === null && disclosure.noticeAcknowledgedAt === null;
-              const needsPostNoticeAck = disclosure.providedAt !== null && disclosure.postNoticeAcknowledgedAt === null;
-              return <li key={disclosure.id}>
-                {disclosure.recipientNickname} ({recipientRole}) ·{' '}
-                {disclosure.providedAt === null
-                  ? `요청 ${new Date(disclosure.requestedAt).toLocaleString('ko-KR')} · ${disclosure.noticeAcknowledgedAt === null ? '알림 확인 전, 위치 미공유' : '알림 확인 완료, 제공 대기'}`
-                  : `${new Date(disclosure.providedAt).toLocaleString('ko-KR')} 제공 · 만남 조율`}
-                {needsPreNoticeAck && <>
-                  <p role="alert">{disclosure.recipientNickname} ({recipientRole})가 {new Date(disclosure.requestedAt).toLocaleString('ko-KR')}에 만남 조율을 위해 위치를 요청했습니다. 확인 전에는 좌표를 공유하지 않습니다.</p>
-                  <button type="button" disabled={actionBusy} onClick={() => void acknowledgeLocationDisclosure(disclosure)}>위치 요청 안내 확인</button>
-                </>}
-                {needsPostNoticeAck && <>
-                  <p role="alert">내 위치가 {disclosure.recipientNickname} ({recipientRole})에게 {new Date(disclosure.providedAt!).toLocaleString('ko-KR')}에 만남 조율 목적으로 제공되었습니다.</p>
-                  <button type="button" disabled={actionBusy} onClick={() => void acknowledgeLocationDisclosure(disclosure)}>위치 제공 안내 확인</button>
-                </>}
-              </li>;
-            })}
-          </ul> : <p>최근 6개월 동안 기록된 위치 제공 내역이 없습니다.</p>}
         </section>
         <form action={(form) => { void updateProfile(form); }}>
           <label>닉네임 <input name="nickname" defaultValue={profile.nickname} maxLength={30} required /></label>
@@ -1330,7 +887,7 @@ function App() {
             <h4>지점 추가</h4>
             <form onSubmit={(event) => { event.preventDefault(); void saveAdminStop(null, new FormData(event.currentTarget)); }}>
               <label>지점 이름 <input name="name" maxLength={80} required /></label>
-              <label>종류 <select name="kind" defaultValue="GATE"><option value="GATE">교문</option><option value="DESTINATION">목적지</option></select></label>
+              <label>종류 <select name="kind" defaultValue="GATE"><option value="GATE">승차 지점</option><option value="DESTINATION">목적지</option></select></label>
               <label>위도 <input name="lat" type="number" min={-90} max={90} step="any" required /></label>
               <label>경도 <input name="lng" type="number" min={-180} max={180} step="any" required /></label>
               <label><input name="active" type="checkbox" defaultChecked /> 활성화</label>
@@ -1340,7 +897,7 @@ function App() {
             {adminStops.length ? <ul>{adminStops.map((stop) => <li key={stop.id}>
               <form onSubmit={(event) => { event.preventDefault(); void saveAdminStop(stop.id, new FormData(event.currentTarget)); }}>
                 <label>지점 이름 <input name="name" defaultValue={stop.name} maxLength={80} required /></label>
-                <label>종류 <select name="kind" defaultValue={stop.kind}><option value="GATE">교문</option><option value="DESTINATION">목적지</option></select></label>
+                <label>종류 <select name="kind" defaultValue={stop.kind}><option value="GATE">승차 지점</option><option value="DESTINATION">목적지</option></select></label>
                 <label>위도 <input name="lat" type="number" min={-90} max={90} step="any" defaultValue={stop.lat} required /></label>
                 <label>경도 <input name="lng" type="number" min={-180} max={180} step="any" defaultValue={stop.lng} required /></label>
                 <label><input name="active" type="checkbox" defaultChecked={stop.active === 1} /> 활성화</label>
@@ -1349,8 +906,8 @@ function App() {
             </li>)}</ul> : <p>등록된 지점이 없습니다.</p>}
             <h4>노선 추가</h4>
             <form onSubmit={(event) => { event.preventDefault(); void saveAdminRoute(null, new FormData(event.currentTarget)); }}>
-              <label>출발 교문 <select name="originStopId" defaultValue="" required>
-                <option value="" disabled>교문 선택</option>
+              <label>승차 지점 <select name="originStopId" defaultValue="" required>
+                <option value="" disabled>승차 지점 선택</option>
                 {adminStops.filter((stop) => stop.kind === 'GATE' && stop.active === 1).map((stop) => <option key={stop.id} value={stop.id}>{stop.name}</option>)}
               </select></label>
               <label>목적지 <select name="destinationStopId" defaultValue="" required>
@@ -1406,46 +963,16 @@ function App() {
           </li>)}</ul> : <p>차단한 사용자가 없습니다.</p>}
           <p>차단을 해제해도 종료된 요청이나 운행은 다시 열리지 않습니다.</p>
         </section>}
-        {activeLocationContext && <section aria-labelledby="location-title">
-          <h3 id="location-title">동승 위치 공유</h3>
-          <p>위치 공유는 수락된 운행 관계에서만 작동합니다. 내 위치는 현재 동승 상대에게만 제공되며, 출발·취소·종료·동의 철회 때 삭제됩니다.</p>
-          <p>상대 화면에 내 위치가 응답된 시각과 상대, 만남 조율 목적을 기록해 여기에 표시합니다.</p>
-          <p>위치 동의는 위 설정에서 관리할 수 있습니다. 위치 공유를 철회하면 현재 좌표가 삭제되고 이후 업로드가 거절됩니다.</p>
-          <p>지정 승차 지점: {locationStop?.name ?? (profile.activeActivity?.role === 'DRIVER' ? profile.activeTrip?.originName : profile.activeRequest?.originName)}</p>
-          <div className="actions">
-            <button type="button" disabled={!locationConsented || consentBusy || locationStarted}
-              onClick={() => void startLocationSharing(activeLocationContext)}>내 위치 공유 시작</button>
-          </div>
-          <p role="status">{locationStatus || (locationConsented ? '위치를 갱신하면 동승 상대에게 실제 제공된 내역을 표시합니다.' : '위치 수집과 상대 제공 동의는 각각 선택할 수 있습니다.')}</p>
-          {locationConsented && locationStop && (import.meta.env.VITE_NAVER_MAP_CLIENT_ID?.trim()
-            ? <NaverLocationMap clientId={import.meta.env.VITE_NAVER_MAP_CLIENT_ID.trim()} stop={locationStop} own={ownLocation} shared={sharedLocations} />
-            : <>
-              <p>네이버 지도 Client ID가 설정되지 않아 가상 위치도를 표시합니다.</p>
-              <VirtualLocationMap stop={locationStop} own={ownLocation} shared={sharedLocations} />
-            </>)}
-          {locationConsented && locationStop && <p>승차 지점 좌표: {locationStop.lat.toFixed(5)}, {locationStop.lng.toFixed(5)}</p>}
-          {locationConsented && ownLocation && <div>
-            <h4>내 위치 · 오차 ±{Math.round(ownLocation.accuracyM)}m</h4>
-            <p>{ownLocation.lat.toFixed(5)}, {ownLocation.lng.toFixed(5)} · {locationFreshness(ownLocation.receivedAt)}</p>
-            {ownLocation.accuracyM > 100
-              ? <p role="status">오차가 커 만남 판단에 적합하지 않습니다. 지정 지점과 탑승 코드를 이용해 주세요.</p>
-              : ownLocation.accuracyM > 50 && <p role="status">위치 오차가 있습니다. 지정 지점과 탑승 코드를 이용해 주세요.</p>}
-          </div>}
-          {locationConsented && sharedLocations.length > 0 ? <ul aria-label="동승 상대 위치">
-            {sharedLocations.map((point) => <li key={`${point.role}-${point.sequence}`}>
-              <h4>{point.role === 'DRIVER' ? '운전자' : point.nickname} 위치 · 오차 ±{Math.round(point.accuracyM)}m</h4>
-              <p>{point.lat.toFixed(5)}, {point.lng.toFixed(5)} · {locationFreshness(point.receivedAt)}</p>
-              {point.accuracyM > 100
-                ? <p>오차가 커 만남 판단에 적합하지 않습니다. 지정 지점과 탑승 코드를 이용해 주세요.</p>
-                : point.accuracyM > 50 && <p>위치 오차가 있습니다. 지정 지점과 탑승 코드를 이용해 주세요.</p>}
-            </li>)}
-          </ul> : locationConsented && <p>상대 위치가 아직 없거나 60초가 지나 만료되었습니다. 지정 승차 지점에서 만나 탑승 코드를 사용해 주세요.</p>}
+        {waitingPoint && <section aria-labelledby="waiting-point-title">
+          <h3 id="waiting-point-title">선택한 승차 지점에서 대기</h3>
+          <p>대기 장소: <strong>{waitingPoint}</strong></p>
+          <p>실시간 위치를 수집하거나 서로의 좌표를 공유하지 않습니다. 운전자와 탑승자는 이 승차 지점에서 만나고, 현장에서 탑승 코드를 확인합니다. 앱은 도착 여부를 추적하거나 자동으로 판정하지 않습니다.</p>
         </section>}
         {canRequestRide && !profile.activeActivity && <section aria-labelledby="request-ride-title">
           <h3 id="request-ride-title">운행 검색</h3>
           <form onSubmit={(event) => { event.preventDefault(); void searchTrips(new FormData(event.currentTarget)); }}>
-            <label>검색 노선 <select name="routeId" value={searchRouteId} onChange={(event) => setSearchRouteId(event.currentTarget.value)} required>
-              <option value="" disabled>노선을 선택해 주세요</option>
+            <label>대기할 승차 지점·목적지 <select name="routeId" value={searchRouteId} onChange={(event) => setSearchRouteId(event.currentTarget.value)} required>
+              <option value="" disabled>승차 지점과 목적지를 선택해 주세요</option>
               {routes.map((route) => <option key={route.id} value={route.id}>{route.originName} → {route.destinationName}</option>)}
             </select></label>
             <label>희망 출발 시각 (한국 시간) <input name="desiredDepartureAt" type="datetime-local"
@@ -1492,8 +1019,8 @@ function App() {
             event.preventDefault();
             void createTrip(new FormData(event.currentTarget));
           }}>
-            <label>운행 노선 <select name="routeId" defaultValue="" required>
-              <option value="" disabled>노선을 선택해 주세요</option>
+            <label>승차 지점·목적지 <select name="routeId" defaultValue="" required>
+              <option value="" disabled>승차 지점과 목적지를 선택해 주세요</option>
               {routes.map((route) => <option key={route.id} value={route.id}>{route.originName} → {route.destinationName}</option>)}
             </select></label>
             <label>출발 시각 (한국 시간) <input name="departureAt" type="datetime-local" min={tripDepartureMin} max={tripDepartureMax} required /></label>

@@ -33,7 +33,6 @@ if (environment === 'production') {
       ...process.env,
       CLOUDFLARE_ENV: 'staging',
       VITE_STAGING_AUTH_TEST_ONLY: 'true',
-      VITE_NAVER_MAP_CLIENT_ID: process.env.VITE_NAVER_MAP_CLIENT_ID ?? '',
     };
     const build = spawnSync('npm', ['run', 'build'], { stdio: 'inherit', env });
     if (build.status !== 0) {

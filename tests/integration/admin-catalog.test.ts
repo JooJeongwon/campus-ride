@@ -36,10 +36,10 @@ it('manages stops and routes through admin permissions and audited D1 changes', 
     expect((await request('/api/v1/admin/stops')).status).toBe(401);
     expect((await request('/api/v1/admin/stops', { cookie: admin.cookie })).status).toBe(200);
     expect((await request('/api/v1/admin/routes', { cookie: admin.cookie })).status).toBe(200);
-    expect((await request('/api/v1/admin/stops/30000000-0000-4000-8000-000000000001', {
+    expect((await request('/api/v1/admin/stops/30000000-0000-4000-8000-000000000003', {
       method: 'PATCH', ...admin, body: { name: '변경 금지', kind: 'GATE', lat: 0, lng: 0, active: true },
     })).status).toBe(409);
-    expect((await request('/api/v1/admin/routes/40000000-0000-4000-8000-000000000001', {
+    expect((await request('/api/v1/admin/routes/40000000-0000-4000-8000-000000000002', {
       method: 'PATCH', ...admin, body: { active: false },
     })).status).toBe(409);
     expect((await request('/api/v1/admin/stops', {

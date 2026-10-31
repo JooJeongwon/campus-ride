@@ -4,16 +4,17 @@ async function loginDriverWithTrip(page: import('@playwright/test').Page) {
   await page.goto('/onboarding');
   await page.getByRole('button', { name: '가상 운전자' }).click();
   const activeTrip = page.getByRole('heading', { name: '내 운행' });
-  const routeSelect = page.getByLabel('운행 노선');
+  const driverForm = page.locator('form').filter({ has: page.getByRole('button', { name: '운행 등록' }) });
+  const routeSelect = driverForm.getByRole('combobox', { name: '승차 지점·목적지' });
   await expect(page.getByText(/학생 확인: VERIFIED/)).toBeVisible();
   const terms = page.getByRole('checkbox', { name: /서비스 이용 약관/ });
-  const privacy = page.getByRole('checkbox', { name: /개인정보 처리 안내/ });
+  const privacy = page.getByRole('checkbox', { name: /개인정보 처리방침 확인/ });
   if (!await terms.isChecked()) await terms.check();
   if (!await privacy.isChecked()) await privacy.check();
   await expect.poll(async () => await activeTrip.isVisible() || await routeSelect.isVisible()).toBe(true);
   const created = !await activeTrip.isVisible();
   if (created) {
-    await routeSelect.selectOption({ index: 1 });
+    await routeSelect.selectOption({ label: 'AI공학관 → 가상 캠퍼스' });
     const departure = new Intl.DateTimeFormat('sv-SE', {
       timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
       hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
@@ -41,10 +42,10 @@ test('onboarding requires separate current terms and privacy consent', async ({ 
   await page.goto('/onboarding');
   await page.getByRole('button', { name: '확인 대기 계정' }).click();
   await expect(page.getByText(/학생 확인: PENDING/)).toBeVisible();
-  await expect(page.getByText(/로컬 개발용 동의 체험/).first()).toBeVisible();
+  await expect(page.getByText(/로컬 개발용 확인입니다/).first()).toBeVisible();
 
   const terms = page.getByRole('checkbox', { name: /서비스 이용 약관/ });
-  const privacy = page.getByRole('checkbox', { name: /개인정보 처리 안내/ });
+  const privacy = page.getByRole('checkbox', { name: /개인정보 처리방침 확인/ });
   const saveProfile = page.getByRole('button', { name: '프로필 저장' });
   if (await terms.isChecked()) await terms.uncheck();
   if (await privacy.isChecked()) await privacy.uncheck();
@@ -67,7 +68,7 @@ test('a verified student can submit vehicle details for review', async ({ page }
   await page.goto('/onboarding');
   await page.getByRole('button', { name: '가상 탑승자' }).click();
   const terms = page.getByRole('checkbox', { name: /서비스 이용 약관/ });
-  const privacy = page.getByRole('checkbox', { name: /개인정보 처리 안내/ });
+    const privacy = page.getByRole('checkbox', { name: /개인정보 처리방침 확인/ });
   if (!await terms.isChecked()) await terms.check();
   if (!await privacy.isChecked()) await privacy.check();
   await page.getByRole('textbox', { name: '차량 모델' }).fill('합성 하이브리드');
@@ -106,10 +107,10 @@ test('a rider can request a shared trip and cancel it from the active request sc
   await page.getByRole('button', { name: '로그아웃' }).click();
   await page.getByRole('button', { name: '가상 탑승자' }).click();
   const terms = page.getByRole('checkbox', { name: /서비스 이용 약관/ });
-  const privacy = page.getByRole('checkbox', { name: /개인정보 처리 안내/ });
+  const privacy = page.getByRole('checkbox', { name: /개인정보 처리방침 확인/ });
   if (!await terms.isChecked()) await terms.check();
   if (!await privacy.isChecked()) await privacy.check();
-  await page.getByRole('combobox', { name: '검색 노선' }).selectOption(routeId);
+  await page.getByRole('combobox', { name: '대기할 승차 지점·목적지' }).selectOption(routeId);
   await page.getByLabel('희망 출발 시각 (한국 시간)', { exact: true }).fill(desiredDeparture);
   await page.getByRole('button', { name: '운행 찾기' }).click();
   await expect(page.getByText('추천 이유: 검증된 같은 학과 · 출발 시각이 가까움')).toBeVisible();
@@ -158,110 +159,120 @@ test('a rider can request a shared trip and cancel it from the active request sc
   }
 });
 
-test('accepted riders share locations after the owner acknowledges each disclosure', async ({ page, browser }) => {
-  test.setTimeout(60_000);
-  await page.context().grantPermissions(['geolocation']);
-  await page.context().setGeolocation({ latitude: 37.5001, longitude: 127.0002, accuracy: 75 });
-  const riderContext = await browser.newContext({
-    baseURL: 'http://localhost:8788',
-    permissions: ['geolocation'],
-    geolocation: { latitude: 37.5, longitude: 127, accuracy: 75 },
-  });
+test('driver and rider complete the fixed pickup workflow without GPS sharing', async ({ page, browser, request }) => {
+  test.setTimeout(150_000);
+  const riderContext = await browser.newContext({ baseURL: 'http://localhost:8787', timezoneId: 'Asia/Seoul' });
   const riderPage = await riderContext.newPage();
-  const trip = await loginDriverWithTrip(page);
-  let requestActive = false;
+  let tripId: string;
+  let tripCreated = false;
+  let requestCreated = false;
+
+  const acceptRequiredConsents = async (target: import('@playwright/test').Page) => {
+    for (const label of [/서비스 이용 약관/, /개인정보 처리방침 확인/]) {
+      const checkbox = target.getByRole('checkbox', { name: label });
+      if (!await checkbox.isChecked()) await checkbox.check();
+    }
+  };
 
   try {
-    const tripData = await page.evaluate(async (id) => await fetch(`/api/v1/trips/${id}`, { cache: 'no-store' }).then((response) => response.json()), trip.id);
-    const departureAt = (tripData as { data: { departureAt: number; routeId: string } }).data.departureAt;
-    const routeId = (tripData as { data: { routeId: string } }).data.routeId;
-    const desiredDeparture = new Intl.DateTimeFormat('sv-SE', {
+    await page.goto('/onboarding');
+    await page.getByRole('button', { name: '가상 운전자' }).click();
+    await acceptRequiredConsents(page);
+    const activeTrip = page.getByRole('heading', { name: '내 운행' });
+    const driverForm = page.locator('form').filter({ has: page.getByRole('button', { name: '운행 등록' }) });
+    const driverRoute = driverForm.getByRole('combobox', { name: '승차 지점·목적지' });
+    await expect.poll(async () => await activeTrip.isVisible() || await driverRoute.isVisible()).toBe(true);
+    if (await activeTrip.isVisible()) {
+      const cancel = page.getByRole('button', { name: '운행 취소' });
+      if (await cancel.isVisible()) {
+        await cancel.click();
+        await expect(page.getByText('운행을 취소했습니다.')).toBeVisible();
+      }
+      await expect(driverRoute).toBeVisible();
+    }
+
+    await driverRoute.selectOption({ label: 'AI공학관 → 가상 캠퍼스' });
+    const routeId = await driverRoute.inputValue();
+    const departureAt = Math.ceil(Date.now() / 60_000) * 60_000;
+    const departureInput = new Intl.DateTimeFormat('sv-SE', {
       timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
       hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
     }).format(new Date(departureAt)).replace(' ', 'T');
+    await page.getByLabel('출발 시각 (한국 시간)', { exact: true }).fill(departureInput);
+    await page.getByRole('button', { name: '운행 등록' }).click();
+    await expect(activeTrip).toBeVisible();
+    tripCreated = true;
+    tripId = (await page.locator('section[aria-labelledby="active-trip-title"] code').textContent())?.trim() ?? '';
+    expect(tripId).toBeTruthy();
+    await expect(page.getByRole('heading', { name: '선택한 승차 지점에서 대기' })).toBeVisible();
+    await expect(page.getByText(/대기 장소: AI공학관/)).toBeVisible();
 
-    const acceptLocationConsents = async (target: import('@playwright/test').Page) => {
-      for (const label of [/내 위치를 임시 수집/, /내 위치를 동승 상대에게 제공/]) {
-        const consent = target.getByRole('checkbox', { name: label });
-        if (!await consent.isChecked()) await consent.check();
-      }
-      await expect.poll(() => target.evaluate(async () => {
-        const response = await fetch('/api/v1/me', { cache: 'no-store' });
-        if (!response.ok) return false;
-        const { data } = await response.json() as { data: { requiredConsents: Record<string, { accepted: boolean }> } };
-        return data.requiredConsents.LOCATION_COLLECTION.accepted && data.requiredConsents.LOCATION_SHARING.accepted;
-      })).toBe(true);
-    };
-
+    const tripData = await page.evaluate(async (id) => await fetch('/api/v1/trips/' + id, { cache: 'no-store' }).then((response) => response.json()), tripId);
+    const actualDepartureAt = (tripData as { data: { departureAt: number } }).data.departureAt;
     await riderPage.goto('/onboarding');
     await riderPage.getByRole('button', { name: '가상 탑승자' }).click();
-    for (const label of [/서비스 이용 약관/, /개인정보 처리 안내/]) {
-      const consent = riderPage.getByRole('checkbox', { name: label });
-      if (!await consent.isChecked()) await consent.check();
+    await acceptRequiredConsents(riderPage);
+    const riderRoute = riderPage.getByRole('combobox', { name: '대기할 승차 지점·목적지' });
+    await expect(riderRoute).toBeVisible();
+    await expect(riderRoute.locator('option')).toHaveCount(4);
+    const pickupOptions = await riderRoute.locator('option').allTextContents();
+    for (const stop of ['AI공학관', '중앙도서관', '반도체대학']) {
+      expect(pickupOptions.some((label) => label.startsWith(stop + ' →'))).toBe(true);
     }
-    await riderPage.getByRole('combobox', { name: '검색 노선' }).selectOption(routeId);
+    expect(pickupOptions.filter((label) => label.includes(' → '))).toHaveLength(3);
+    await riderRoute.selectOption(routeId);
+    const desiredDeparture = new Intl.DateTimeFormat('sv-SE', {
+      timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).format(new Date(actualDepartureAt)).replace(' ', 'T');
     await riderPage.getByLabel('희망 출발 시각 (한국 시간)', { exact: true }).fill(desiredDeparture);
     await riderPage.getByRole('button', { name: '운행 찾기' }).click();
-    await riderPage.getByRole('button', { name: '탑승 요청' }).click();
-    requestActive = true;
-    await expect(riderPage.getByText('탑승 요청을 보냈습니다.')).toBeVisible();
-    await expect(page.getByRole('button', { name: '수락' })).toBeVisible({ timeout: 10_000 });
-    await page.getByRole('button', { name: '수락' }).click();
+    const matchingTrip = riderPage.getByRole('listitem').filter({ hasText: 'AI공학관 → 가상 캠퍼스' });
+    await expect(matchingTrip).toBeVisible();
+    await matchingTrip.getByRole('button', { name: '탑승 요청' }).click();
+    requestCreated = true;
+    await expect(riderPage.getByRole('heading', { name: '내 탑승 요청' })).toBeVisible();
+    await expect(riderPage.getByRole('heading', { name: '선택한 승차 지점에서 대기' })).toBeVisible();
+    await expect(riderPage.getByText(/대기 장소: AI공학관/)).toBeVisible();
+    await expect(riderPage.getByText(/실시간 위치를 수집하거나 서로의 좌표를 공유하지 않습니다/)).toBeVisible();
+
+    const acceptButton = page.getByRole('button', { name: '수락' });
+    await expect(acceptButton).toBeVisible({ timeout: 15_000 });
+    await acceptButton.click();
     await expect(page.getByText('탑승 요청을 수락했습니다.')).toBeVisible();
-    await expect(page.getByRole('heading', { name: '동승 위치 공유' })).toBeVisible();
-    await acceptLocationConsents(page);
-    await riderPage.reload();
     await expect(riderPage.getByText(/상태 ACCEPTED/)).toBeVisible();
-    await acceptLocationConsents(riderPage);
+    await riderPage.getByRole('button', { name: '탑승 코드 발급' }).click();
+    const boardingCode = riderPage.locator('section[aria-labelledby="active-request-title"] strong');
+    await expect(boardingCode).toBeVisible();
+    const code = (await boardingCode.textContent())?.trim() ?? '';
+    expect(code).toMatch(/^\d{6}$/);
+    const codeInput = page.locator('input[name="code"]');
+    await expect(codeInput).toBeVisible();
+    await codeInput.fill(code);
+    await page.getByRole('button', { name: '탑승 확인' }).click();
+    await expect(page.getByText('탑승을 확인했습니다. 출발 전에 미탑승 요청을 정리해 주세요.')).toBeVisible();
 
-    await riderPage.getByRole('button', { name: '내 위치 공유 시작' }).click();
-    await expect(riderPage.getByText('위치 오차가 있습니다. 지정 승차 지점에서 만나 주세요.')).toBeVisible();
-    await expect(riderPage.getByText(/37\.50000, 127\.00000/).first()).toBeVisible();
+    await page.waitForTimeout(Math.max(0, actualDepartureAt - Date.now() + 150));
+    await page.getByRole('button', { name: '출발', exact: true }).click();
+    await expect(page.getByText('운행을 시작했습니다.')).toBeVisible();
+    await page.getByRole('button', { name: '운행 완료' }).click();
+    await expect(page.getByText('운행을 완료했습니다.')).toBeVisible();
 
-    const initialRead = await page.evaluate(async (id) => await fetch(`/api/v1/trips/${id}/locations`, { cache: 'no-store' }).then((response) => response.json()), trip.id);
-    expect((initialRead as { data: { locations: unknown[] } }).data.locations).toHaveLength(0);
-    const blocked = await page.evaluate(async (id) => await fetch(`/api/v1/trips/${id}/locations`, { cache: 'no-store' }).then((response) => response.json()), trip.id);
-    expect((blocked as { data: { locations: unknown[] } }).data.locations).toHaveLength(0);
-    const riderHistory = riderPage.getByRole('list', { name: '내 위치 제공 내역' });
-    await expect(riderHistory).toContainText('가상 운전자 (운전자)', { timeout: 15_000 });
-    await expect(riderPage.getByRole('button', { name: '위치 요청 안내 확인' })).toBeVisible({ timeout: 15_000 });
-    const pending = await riderPage.evaluate(async () => await fetch('/api/v1/locations/me', { cache: 'no-store' }).then((response) => response.json()));
-    expect((pending as { data: { disclosures: Array<{ noticeAcknowledgedAt: number | null }> } }).data.disclosures[0]?.noticeAcknowledgedAt).toBeNull();
-
-    await riderPage.getByRole('button', { name: '위치 요청 안내 확인' }).click();
-    await expect(page.getByRole('heading', { name: /가상 탑승자 위치 · 오차/ })).toBeVisible({ timeout: 15_000 });
-    await expect(riderHistory).toContainText('제공 · 만남 조율');
-    await expect(riderPage.getByRole('button', { name: '위치 제공 안내 확인' })).toBeVisible();
-    await riderPage.getByRole('button', { name: '위치 제공 안내 확인' }).click();
-    await expect.poll(() => riderPage.evaluate(async () => {
-      const response = await fetch('/api/v1/locations/me', { cache: 'no-store' });
-      const { data } = await response.json() as { data: { disclosures: Array<{ postNoticeAcknowledgedAt: number | null }> } };
-      const disclosure = data.disclosures[0];
-      return Boolean(disclosure && disclosure.postNoticeAcknowledgedAt !== null);
-    })).toBe(true);
-
-    await page.getByRole('button', { name: '내 위치 공유 시작' }).click();
-    await expect(page.getByText('위치 오차가 있습니다. 지정 승차 지점에서 만나 주세요.')).toBeVisible();
-    const driverInitialRead = await riderPage.evaluate(async (id) => await fetch(`/api/v1/trips/${id}/locations`, { cache: 'no-store' }).then((response) => response.json()), trip.id);
-    expect((driverInitialRead as { data: { locations: unknown[] } }).data.locations).toHaveLength(0);
-    await expect(page.getByRole('button', { name: '위치 요청 안내 확인' })).toBeVisible({ timeout: 15_000 });
-    await page.getByRole('button', { name: '위치 요청 안내 확인' }).click();
-    await expect(riderPage.getByRole('heading', { name: /운전자 위치 · 오차/ })).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByRole('button', { name: '위치 제공 안내 확인' })).toBeVisible({ timeout: 15_000 });
-    await page.getByRole('button', { name: '위치 제공 안내 확인' }).click();
-    await expect(page.locator('.virtual-map__accuracy')).toHaveCount(2);
-    await expect(riderPage.locator('.virtual-map__accuracy')).toHaveCount(2);
+    const health = await request.get('/api/v1/health');
+    expect(health.headers()['permissions-policy']).toContain('geolocation=()');
+    expect((await request.get('/api/v1/locations/me')).status()).toBe(404);
   } finally {
-    const cancelRequest = riderPage.getByRole('button', { name: '요청 취소' });
-    if (requestActive && await cancelRequest.isVisible().catch(() => false)) {
-      await cancelRequest.click();
-      await expect(riderPage.getByText('탑승 요청을 취소했습니다.')).toBeVisible();
+    if (requestCreated) {
+      const cancelRequest = riderPage.getByRole('button', { name: '요청 취소' });
+      if (await cancelRequest.isVisible().catch(() => false)) await cancelRequest.click().catch(() => undefined);
     }
-    if (trip.created) {
-      const cancelTrip = page.getByRole('button', { name: '운행 취소' });
-      if (await cancelTrip.isVisible().catch(() => false)) {
-        await cancelTrip.click();
-        await expect(page.getByText('운행을 취소했습니다.')).toBeVisible();
+    if (tripCreated) {
+      const abort = page.getByRole('button', { name: '운행 중단' });
+      if (await abort.isVisible().catch(() => false)) {
+        await abort.click().catch(() => undefined);
+      } else {
+        const cancelTrip = page.getByRole('button', { name: '운행 취소' });
+        if (await cancelTrip.isVisible().catch(() => false)) await cancelTrip.click().catch(() => undefined);
       }
     }
     await riderContext.close();

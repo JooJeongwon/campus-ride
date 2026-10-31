@@ -1,8 +1,7 @@
 import * as oauth from 'oauth4webapi';
 import { z } from 'zod';
-import type { Bindings } from '../env';
-import { allowedDomains } from '../env';
-import { sha256 } from './session';
+import { allowedDomains, type Bindings } from '../env';
+import { randomToken, sha256 } from './session';
 
 const encoder = new TextEncoder();
 const issuer = new URL('https://accounts.google.com');
@@ -28,11 +27,6 @@ function environmentReady(env: Bindings): boolean {
     && env.STUDENT_VERIFICATION_MODE === 'SCHOOL_ASSERTION'
     && allowedDomains(env.ALLOWED_EMAIL_DOMAINS).length && allowedDomains(env.ALLOWED_HOSTED_DOMAINS).length
     && env.POLICY_TERMS_VERSION && env.POLICY_TERMS_URL && env.POLICY_PRIVACY_VERSION && env.POLICY_PRIVACY_URL);
-}
-
-function randomToken(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
-  return btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
 }
 
 async function derivedNonce(binding: string, state: string): Promise<string> {

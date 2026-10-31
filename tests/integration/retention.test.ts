@@ -78,7 +78,7 @@ it('applies location, consent, audit, and deleted-account retention cutoffs', as
     await env.DB.prepare(`INSERT INTO trips
       (id,driver_id,route_id,departure_at,expires_at,seat_capacity,gender_snapshot,gender_filter,
        department_verified_snapshot,prefer_same_department,created_at)
-      VALUES(?,?, '40000000-0000-4000-8000-000000000001',?,?,?,?, 'ANY',0,0,?)`)
+      VALUES(?,?, '40000000-0000-4000-8000-000000000002',?,?,?,?, 'ANY',0,0,?)`)
       .bind(archivedTripId, archivedDriverId, departureAt, departureAt + 900_000, 1, 'UNDISCLOSED', oldActivityAt).run();
     await env.DB.prepare(`UPDATE trips SET status='CANCELLED',version=version+1,last_command_id=?,ended_at=?,updated_at=? WHERE id=?`)
       .bind(crypto.randomUUID(), now, now, archivedTripId).run();

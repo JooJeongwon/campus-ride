@@ -1,8 +1,8 @@
 # 교내 동승 매칭 웹앱 — Architecture
 
-문서 버전: 0.8 · 기준일: 2026-10-29 · 상태: P1~P4 구현, P5 위치 공유·가상 위치도와 NAVER SDK 연결 구현. 사용자가 운영주체를 가천대학교, 운영팀을 고범규·김동규·남성수·주정원·최익준, 문의처를 `jwjoo0512@gmail.com`으로 지정했다. 학교 공식 승인·책임자 지정과 위치정보 사업 분류·신고 검토는 MVP에서 보류하기로 했으며 완료·면제 판단이 아니다. 만 14세 미만 이용자가 없다는 것은 사용자가 정한 대상 가정이며 Google 인증에서 연령은 검증하지 않는다. 정책 4종과 복구 절차는 현행 법령 검토 반영 v1.2 초안이며 미게시·미효력이다. 위치 공유 integration test는 사전·사후 안내 확인 순서를 통과했으나 운행별 공유 동의·매 제공 즉시 단말 통지·일시중지·법정 확인자료 필드 자동기록은 검증되지 않았다. D1 백업 파기, 계정별 국외처리 상세, 외부 권한대장·복구 훈련은 미완료다. staging은 OIDC 계정 검증 전용(사용자·세션 생성 없음)이며 일반 API는 차단한다. Cloudflare D1은 한국 전용 jurisdiction을 지원하지 않으며 기존 APAC 설정을 변경하지 않았다. NCP 호스트/요금과 실기기 검증도 대기.
+문서 버전: 0.9 · 기준일: 2026-10-31 · 상태: 2026-10-31 사용자 결정으로 실시간 위치 공유를 중단하고 등록 승차 지점을 선택해 기다리는 흐름으로 변경했다. 브라우저 Geolocation을 호출하지 않고 Worker 위치 라우트와 지도 SDK 런타임을 제거했으며 지도 SDK CSP 허용도 없다. 위치정보법 분류·신고와 고정 지점 선택의 법적 취급은 미확정이며 법률 준수·면제 판단이 아니다. 구형 위치 테이블·migration 및 local/staging/복구 사본의 정리 여부는 미완료다. 학교 공식 승인·책임자 지정, 국외처리 상세, 외부 권한대장·복구 훈련도 미완료다. staging은 OIDC 계정 검증 전용(사용자·세션 생성 없음)이며 일반 API는 차단한다.
 
-제품 범위는 [Project.md](Project.md), 작업 순서는 [Roadmap.md](Roadmap.md), 에이전트 지침은 [AGENTS.md](AGENTS.md)를 따른다. P1의 테이블·인덱스·로컬 실행과 health API, P2의 OIDC·세션·프로필·학생 확인·정책 동의, P3의 운전자 프로필·운행/요청 수명주기와 만료 Cron, P4의 추천 검색·학과 순위·성별/그룹 조건, P5의 로컬 위치 공유 핵심 흐름과 가상 위치도, P6의 신고·차단·계정 제한·학생 자격 만료·운영 UI·동의 관리·계정 탈퇴 1차 흐름과 기본 보안 헤더를 구현했다. NAVER Web Dynamic Map SDK 코드는 연결했고 localhost에서 SDK 응답과 Map 인스턴스 생성을 확인했지만 타일 표시·인증, NCP 허용 호스트·비용·위탁 검토와 실제 위치 정책·모바일 실기기는 미확정/미검증이다. 보관기간·복구 정책과 추가 운영 도구도 남아 있다. 현재 구현 범위와 실행 절차는 §14~30에 기록한다. 공식 플랫폼 문서로 확인한 기능과 이 서비스의 설계 기본값을 구분한다.
+제품 범위는 [Project.md](Project.md), 작업 순서는 [Roadmap.md](Roadmap.md), 에이전트 지침은 [AGENTS.md](AGENTS.md)를 따른다. 현재 만남 흐름은 운영자가 등록한 노선의 출발 지점을 선택해 현장에서 대기하고 탑승 코드로 확인하는 방식이다. legacy 위치 테이블·migration과 데이터 보존·삭제 검토는 남아 있지만 위치 API 및 지도 런타임은 제거했다. 현재 런타임 동작은 §8, 과거 구현 기록은 §21~22를 참고한다.
 
 ## 1. 시스템 구성
 
@@ -13,23 +13,22 @@ flowchart TD
     W --> R["인증·매칭·운행 API"]
     R --> D["Cloudflare D1"]
     W --> G["Google OIDC"]
-    B --> M["지도 SDK"]
     C["Workers Cron Trigger"] --> J["만료·보관 정리"]
     J --> D
 ```
 
 | 구성 | 선택 | 역할 |
 | --- | --- | --- |
-| 웹 | React + Vite + TypeScript | 모바일 UI, 브라우저 위치 API, 지도 |
+| 웹 | React + Vite + TypeScript | 모바일 UI, 등록된 승차 지점·운행 선택 |
 | API | Hono + Zod + TypeScript | 인증·인가·입력 검증·매칭·상태 전이 |
 | 호스팅 | Workers Static Assets | 정적 프런트와 API를 같은 origin에서 제공 |
-| DB | D1 | 사용자·세션·운행·요청·최신 위치·운영 기록 |
+| DB | D1 | 사용자·세션·운행·요청·운영 기록. legacy 위치 테이블은 사용 중지 상태 |
 | 정리 | Worker `scheduled()` | 만료 처리, 위치·세션·멱등 기록 삭제 |
 | 인증 | Google OIDC | 학교 조직 계정 확인, 서비스 세션 발급 |
-| 지도 | NAVER Web Dynamic Map | 지점·위치·오차 반경 표시. Client ID 미설정 시 합성 가상 지도 fallback |
+| 위치 | 고정 카탈로그 지점 | 이용자는 노선 지점만 선택하며 브라우저 좌표를 수집하지 않음 |
 | 테스트 | Vitest + Workers 런타임, Playwright | 도메인·D1·브라우저 검증 |
 
-MVP에는 KV·Durable Objects·Queues·R2·외부 DB가 필요하지 않다. D1이 상태의 기준이며 Worker 인스턴스 메모리에 영속 상태를 두지 않는다. 지도 공급자가 받는 정보와 로딩 범위는 개인정보 처리 검토에 포함한다.
+MVP에는 KV·Durable Objects·Queues·R2·외부 DB가 필요하지 않다. D1이 상태의 기준이며 Worker 인스턴스 메모리에 영속 상태를 두지 않는다.
 
 ## 2. 배포와 라우팅
 
@@ -137,20 +136,20 @@ type DepartmentParseResult = {
 | `trips` | id, driver_id, route_id, departure_at, expires_at, seat_capacity, gender_snapshot, gender_filter, department_id_snapshot, department_verified_snapshot, prefer_same_department, status, version, last_command_id, started_at, ended_at, created_at | seat_capacity 1~4 및 차량 정원 이하. 스냅샷·조건은 활동 중 고정 |
 | `ride_requests` | id, trip_id, rider_id, desired_departure_at, gender_snapshot, gender_filter, department_id_snapshot, department_verified_snapshot, prefer_same_department, status, expires_at, accepted_at, boarded_at, boarding_code_hash, boarding_code_expires_at, boarding_attempt_count, version, last_command_id, created_at | 상태별 타임스탬프, 짧은 수명 탑승 코드 해시 |
 | `active_user_locks` | user_id, role, trip_id, request_id, created_at | user_id PK, DRIVER는 trip_id만, RIDER는 request_id만. 한 사람의 동시 활동 방지 |
-| `latest_locations` | user_id, trip_id, request_id, lat, lng, accuracy_m, captured_at, received_at, expires_at, sequence | user_id PK. 운전자 request_id=NULL. 사용자당 현재 좌표 1개만 보관 |
-| `location_disclosure_records` | id, owner_user_id, recipient_user_id, recipient_nickname, recipient_role, trip_id, request_id, sequence, purpose, requested_at, notice_acknowledged_at, position_delivered_at, post_notice_acknowledged_at | 현재는 좌표 없이 상대·목적을 안내하고 소유자 확인 후 좌표를 보내며 실제 제공 시각과 제공 후 확인 시각을 기록한다. 이 확인은 개별 제공 동의/법정 통지로 검증되지 않았다. 법 적용 시 확인자료는 원칙적으로 최소 6개월 보관하고, 해당 동의 철회 시 철회 범위 자료를 지체 없이 파기한다. 법정 확인자료의 취득경로·제공방법까지 기록하는지는 미검증이다. |
-| `location_notice_presence` | user_id, trip_id, request_id, last_seen_at, expires_at | 제공자 화면의 최근 위치 화면 활성 상태 확인용 15초 presence |
-| `location_access_records` | id, user_id, location_owner_user_id, action, trip_id, request_id, accessed_at | 업로드/본인조회/상대조회 이벤트. 좌표 미포함, 최대 1년 보관; 위치 소유자의 동의 철회/탈퇴 때 해당 소유자 위치에 연결된 행 삭제 |
+| `latest_locations` | user_id, trip_id, request_id, lat, lng, accuracy_m, captured_at, received_at, expires_at, sequence | legacy 위치 공유 데이터. 새 런타임 경로는 쓰지 않음. 기존 행/복구 사본은 별도 검토 |
+| `location_disclosure_records` | id, owner_user_id, recipient_user_id, recipient_nickname, recipient_role, trip_id, request_id, sequence, purpose, requested_at, notice_acknowledged_at, position_delivered_at, post_notice_acknowledged_at | legacy 확인 자료 테이블. 새 런타임 경로는 쓰지 않음. 과거 자료 보유·삭제 근거 미확정 |
+| `location_notice_presence` | user_id, trip_id, request_id, last_seen_at, expires_at | legacy 위치 공유 presence 테이블 |
+| `location_access_records` | id, user_id, location_owner_user_id, action, trip_id, request_id, accessed_at | legacy 위치 접근기록 테이블. 좌표 미포함 |
 | `sessions` | token_hash, user_id, csrf_hash, created_at, last_seen_at, expires_at, revoked_at | 원문 세션 토큰 금지. token_hash PK |
 | `oauth_states` | state_hash, nonce_hash, browser_binding_hash, safe_return_path, created_at, expires_at, consumed_at | state 1회 사용 및 브라우저 연계. PKCE 채택 시 verifier도 짧게 보호·보관 |
-| `consents` | id, user_id, kind, policy_version, granted_at, revoked_at | 약관·개인정보·위치 수집/상대 제공 등 목적별 기록. 실제 구분은 법무 검토로 확정 |
+| `consents` | id, user_id, kind, policy_version, granted_at, revoked_at | 약관·개인정보 안내와 legacy 위치 동의 기록. 위치 동의는 현재 권한 조건이 아님 |
 | `user_blocks` | blocker_id, blocked_id, created_at, last_event_id | 복합 PK, 자기 차단 금지, 양방향 후보 제외. 신규 생성·해제는 감사 이벤트로만 가능 |
 | `reports` | id, reporter_id, reported_user_id, trip_id, request_id, category, description, status, assigned_to, created_at, resolved_at | 당사자가 관련 운행을 신고. 본문 길이 제한, 운영자만 처리 |
 | `audit_events` | id, actor_id, event_type, resource_type, resource_id, command_id, safe_metadata_json, created_at | 상태 변경·승인·제한·접근 처리. 좌표·이메일·코드·토큰 금지 |
 | `idempotency_keys` | user_id, operation, key, request_hash, command_id, result_json, http_status, created_at, expires_at | 복합 PK, command_id UNIQUE. 제한 정보 없는 mutation 결과만 저장 |
 | `rate_limit_buckets` | subject_hash, operation, window_start, count, expires_at | 복합 PK(subject_hash, operation, window_start). 플랫폼 제한 기능을 쓰지 않을 때의 원자적 카운터. IP는 단기 HMAC 값만 사용 |
 
-`location_disclosure_records`는 최신 위치와 분리된 좌표 없는 제공 기록이다. 위치정보법이 적용되면 수집·이용·제공 확인자료를 자동 기록하고 원칙적으로 최소 6개월 보관해야 하며, 동의 철회 시 철회 범위의 위치와 확인자료를 지체 없이 파기해야 한다. 현재 정리 작업은 6개월 지난 행을 삭제하고 철회 시 온라인 D1 자료를 지우지만, D1 Time Travel 사본은 개별 삭제하지 못한다. 소유자가 사전 안내 확인 버튼을 누르기 전에는 `GET /trips/:tripId/locations`가 새 sequence 좌표를 반환하지 않으며 실제 제공 시각과 제공 후 확인 시각을 별도 저장한다. 이 사전 확인은 특정 제공의 적극적 동의가 아니고 제공 후 확인은 같은 수집 단말에 대한 즉시 통지로 검증되지 않았다. 법정 확인자료 정의에 포함된 취득경로·이용/제공방법을 현재 스키마가 충분히 기록하는지도 미검증이다. 위치정보 사업자 분류/신고, 백업 파기, 실제 통지 의무는 운영 형태 확인 전이다. Cloudflare 위치시스템 접근권한 변경 이력은 외부 권한대장에 최소 5년 보관해야 할 수 있으나 아직 준비되지 않았다. `audit_events`가 모든 법정 기록을 대신한다고 가정하지 않는다.
+위 네 위치 테이블은 이전 실시간 위치 구현의 잔여 schema다. 현재 제품은 단말 좌표를 수집·저장·제공하지 않으며 location API도 등록하지 않는다. 고정 노선 지점 선택은 운행/요청 ID와 연결되므로 의도한 만남 장소를 나타낼 수 있다. 이 정보의 위치정보법·개인정보보호법상 성격, 사업자 분류·신고, 처리 근거는 실제 운영 범위를 정해 검토해야 하며 이번 코드 변경이 면제나 준수를 뜻하지 않는다. 기존 D1 행과 Time Travel 복구 사본의 보유·삭제 계획은 미완료다.
 
 ### 4.3 관계와 인덱스
 
@@ -162,7 +161,6 @@ erDiagram
     TRIPS ||--o{ RIDE_REQUESTS : receives
     USERS ||--o{ RIDE_REQUESTS : requests
     USERS ||--o| ACTIVE_USER_LOCKS : holds
-    USERS ||--o| LATEST_LOCATIONS : shares
     DEPARTMENTS ||--o{ USERS : identifies
 ```
 
@@ -212,7 +210,7 @@ erDiagram
 | `BOARDED` | `COMPLETED` | 운행 완료와 같은 DB batch에서 전이 |
 | `BOARDED` | `ABORTED` | 운행 중단과 같은 DB batch에서 전이 |
 
-탑승 확인 코드는 6자리 무작위, 기본 10분 유효, 실패 5회 후 잠금/재발급이다. HMAC 해시만 저장하고 요청 ID와 결합한다. 탑승자가 본인에게만 발급/재발급하여 화면에 표시하며, 원문을 영구 저장하거나 멱등 응답에 보관하지 않는다. 운전자는 코드를 제출해 확인한다. GPS 근접은 안내용이다.
+탑승 확인 코드는 6자리 무작위, 기본 10분 유효, 실패 5회 후 잠금/재발급이다. HMAC 해시만 저장하고 요청 ID와 결합한다. 탑승자가 본인에게만 발급/재발급하여 화면에 표시하며, 원문을 영구 저장하거나 멱등 응답에 보관하지 않는다. 운전자는 코드를 제출해 확인한다. 이용자 현장 도착은 앱에서 추적하거나 판정하지 않는다.
 
 코드 시도 카운터는 오류 응답을 반환하더라도 커밋되어야 한다. 이후 탑승 상태 전이 batch가 실패하며 시도 횟수까지 롤백되는 구조를 피한다. 성공 전이에서는 검증한 코드 해시·버전·유효기간이 여전히 동일한지 재확인한다. 코드 발급/재발급도 별도 rate limit을 적용한다.
 
@@ -251,46 +249,17 @@ trigger는 수락뿐 아니라 요청 생성의 상호 제약과 부적절한 �
 
 그룹 `G = 운전자 + ACCEPTED/BOARDED 승객 + 신규 후보`에 대해 모든 서로 다른 두 사용자 a, b가 `allows(a.filter, a.gender, b.gender)`를 만족해야 수락할 수 있다. 매칭 API에서 불필요하게 전체 그룹의 성별을 공개할 필요는 없다.
 
-추천 함수는 필수 조건 통과 후보에 `(sameDeptPenalty, departureGapMs, stopDistanceBucket, createdAt, id)`의 오름차순 정렬을 적용한다. 같은 학과 우선이 꺼져 있으면 첫 항목은 모두 0이다. 같은 학과는 양쪽 verified snapshot과 동일 department_id가 있어야 한다. 교문 하나로 고정한 조회에서는 거리 항목이 동일하므로 시간·등록순이 뒤를 결정한다.
+추천 함수는 필수 조건 통과 후보에 `(sameDeptPenalty, departureGapMs, createdAt, id)`의 오름차순 정렬을 적용한다. 같은 학과 우선이 꺼져 있으면 첫 항목은 모두 0이다. 같은 학과는 양쪽 verified snapshot과 동일 department_id가 있어야 한다. 현재 검색은 한 노선의 고정 승차 지점으로 제한되므로 위치·거리 순위는 사용하지 않는다.
 
 출발 희망과 운행 시간 차이 기본 허용 범위는 10분이다. 목록에 표시된 잔여 좌석·추천은 이후 바뀔 수 있으므로 수락 직전에 DB가 재검증한다. 추천 점수를 노출한다면 `같은 학과`, `출발 희망 시간과 가까움` 같은 사실 기반 이유를 사용한다.
 
-## 8. 위치 수집·조회·보관
+## 8. 승차 지점 선택·대기
 
-### 8.1 브라우저
+운행 생성과 검색에서 `route_id`를 선택한다. 허용된 route는 운영자가 확인한 고정 origin stop과 destination stop을 연결하며, route_id가 동일해야 요청을 생성할 수 있다. 따라서 운전자와 탑승자가 선택하는 만남 장소는 해당 노선의 origin stop이다. 활성 활동 화면은 지점 이름만 보여주고 그 장소에서 직접 기다리도록 안내한다. 차량 도착·이용자 현장 도착은 추적하거나 자동 판정하지 않으며, 탑승은 현장에서 6자리 코드로 확인한다.
 
-위치 동의 이후 활성 탑승 화면에서만 `watchPosition()`을 시작한다. 예시 옵션은 `{enableHighAccuracy:true, timeout:10000, maximumAge:5000}`다. 화면 숨김·동의 철회·취소·출발·종료에는 `clearWatch()`와 폴링 중지를 호출한다. 재진입 시 최신 상태와 권한을 확인한 뒤 다시 시작한다.
+웹 클라이언트는 Geolocation API를 호출하지 않는다. 실시간 좌표 업로드·조회 API는 Worker에 등록하지 않아 기본 404이며, 지도 SDK도 로드하지 않는다. 고정 승차 지점 선택과 route/request의 연결 자체가 개인정보 또는 위치정보에 해당하는지는 실제 서비스의 목적·운영 형태에 따라 검토한다. 이 설계는 위치정보법상 사업 분류·신고, 개인정보 처리 근거 또는 법정 의무의 면제를 확정하지 않는다.
 
-위치 획득 주기는 브라우저가 정하므로 10초마다 새 GPS fix가 온다고 보장하지 않는다. 클라이언트는 최신 fix를 **최소 10초 간격**으로 업로드하고 중복·과도한 쓰기를 억제한다. 서버는 빈도 제한을 독립적으로 강제한다.
-
-정확도 50m 이하는 일반 표시, 50~100m는 경고, 100m 초과는 만남 판단에 부적합하다고 표시한다. 이 값은 파일럿 조정값이다. 에러 코드별 권한 거절·시간 초과·확보 실패 안내와 지정 승차 지점 대안을 제공한다. [Geolocation 기준](https://www.w3.org/TR/geolocation/)
-
-### 8.2 서버와 접근 행렬
-
-| 조회자 | 대상 | 허용 조건 |
-| --- | --- | --- |
-| 본인 | 본인 | 현재 공유 상태·동의 확인용 |
-| 운전자 | 수락/탑승된 본인 운행 승객 | trip OPEN, request ACCEPTED 또는 BOARDED, 양쪽 자격/계정 유효, 위치 동의 유효 |
-| 승객 | 자기 운전자 | 위 조건 및 본인 요청 관계 확인 |
-| 승객 | 다른 승객 | 항상 거절 |
-| 다른 학생/운영자 | 임의 학생 | 일반 API에서 항상 거절 |
-
-서버는 대상 ID가 아니라 관계에서 허용 대상을 결정한다. 차단·취소·정지 시 행이 남아 있어도 조회를 거절한다. 위치 조회는 `Cache-Control: no-store`이며 멱등 결과에 저장하지 않는다.
-
-업로드는 위도 -90~90, 경도 -180~180, 유한한 수·양수 accuracy, 활성 trip/request ID, 캡처 시각과 서버 수신 시각을 검증한다. 60초보다 오래되거나 30초 초과 미래인 캡처는 거절한다. 이동 범위 밖·비정상 이동은 경고/무시 기준으로 다루며 실제 위치의 진위를 보장하지 않는다.
-
-현재 활동별 단조 증가 sequence로 이전 업로드가 최신 위치를 덮지 못하게 하고, 새 브라우저는 서버의 현재 sequence 이후부터 재개한다. 상태 검사와 UPSERT는 동일 조건부 SQL/batch에서 수행하여 취소 뒤 늦게 도착한 업로드가 위치를 되살리지 못하게 한다. expires_at은 received_at+60초다.
-
-### 8.3 TTL과 백업
-
-- 조회 시 received_at이 30초 초과면 갱신 중단, expires_at 경과면 좌표를 반환하지 않는다.
-- 출발·취소·거절·완료·중단·철회에서 관련 현재 위치를 같은 상태 변경 batch로 삭제한다.
-- 위치 수집/제공 동의 철회 때 본인의 위치 제공·통지 확인자료, 위치 소유자 접근기록과 알림 presence도 D1에서 즉시 삭제한다. 본인이 상대 위치를 조회한 보안 접근기록은 최대 1년 보관하며, `location_owner_user_id`로 철회자의 좌표가 조회된 로그를 함께 정리한다.
-- Cron은 5분마다 남은 만료 좌표·세션·OAuth state·멱등 결과와 만료 활동을 제한된 배치로 정리한다.
-- 학생 자격 만료·정지·차단은 관련 미탑승 요청을 취소한다. 운전자가 영향을 받으면 해당 OPEN 운행도 종료한다. 영향을 받는 관계에 BOARDED 승객이 있거나 운행이 IN_PROGRESS라면 운행 전체를 ABORTED로 전환하고 관련 요청·잠금을 함께 정리한다. 승객 간 차단도 같은 규칙을 적용한다. 물리적 하차를 자동 확인했다는 문구를 쓰지 않는다.
-- D1 행 삭제는 과거 Time Travel 사본까지 즉시 지우지 않는다. staging Free의 복구 창은 7일이다. 복구는 DB 전체를 덮어쓰므로 외부 삭제/철회대조부와 [운영 복구 절차](docs/operations/data-retention-and-restore.md)를 따른다. 해당 대조부가 아직 구축되지 않아 원격 계정 API는 계속 닫는다.
-- 온라인 정리 기준은 [개인정보 처리방침](docs/policies/privacy.md)과 운영 절차에 정했다. 위치 API는 수신 후 60초부터 만료 좌표를 반환하지 않고 Cron이 5분마다 제한된 배치로 물리 삭제한다. 배치 한도/실패에 따라 물리 삭제는 늦을 수 있으며 백업 기간은 별도다.
-- 위치정보법 제19조와 위치정보 보호조치 기준 적용 대상 여부는 실제 운영 형태 확인이 남아 있다. 구현은 새 위치 sequence 요청 때 좌표 없는 사전 안내 기록을 만들고, 소유자가 안내 확인 버튼을 누르기 전에는 좌표를 반환하지 않는다. 실제 좌표가 반환되면 제공 시각을 저장하고, 제공 후 화면에 수신자·시각·목적을 표시한다. 이 두 확인은 법정 개별 제공 동의와 즉시 통지로 검증되지 않았다. 법정 확인자료에 필요한 취득경로·이용/제공방법의 저장 충족 여부도 미검증이다. 동의 철회 후 온라인 DB의 위치 확인자료는 삭제되나 7일 D1 복구 사본은 개별 삭제하지 못한다. 법정 보유·철회, 백업 파기 및 통지 요건이 해소될 때까지 정책 시행과 위치 공유를 보류한다. 접근권한 부여/변경/말소 이력 5년 보관용 Cloudflare 외부대장도 미구축이다. [위치정보법 제19조](https://www.law.go.kr/lsLinkProc.do?chrClsCd=010202&joLnkStr=%EC%A0%9C18%EC%A1%B0%EC%A0%9C2%ED%95%AD+%EB%98%90%EB%8A%94+%EC%A0%9C19%EC%A1%B0%EC%A0%9C5%ED%95%AD&joNo=001800000%5E001900000&lsId=009882&lsNm=%EC%9C%84%EC%B9%98%EC%A0%95%EB%B3%B4%EC%9D%98+%EB%B3%B4%ED%98%B8+%EB%B0%8F+%EC%9D%B4%EC%9A%A9+%EB%93%B1%EC%97%90+%EA%B4%80%ED%95%9C+%EB%B2%95%EB%A5%A0&mode=2) · [위치정보법 제24조](https://law.go.kr/lsLinkCommonInfo.do?chrClsCd=010202&lsJoLnkSeq=1029559327) · [위치정보 보호조치 기준](https://www.law.go.kr/LSW/admRulLsInfoP.do?admRulSeq=2100000279386)
+`latest_locations`, `location_disclosure_records`, `location_notice_presence`, `location_access_records`와 migration은 이전 구현의 호환·정리 대상으로 남아 있다. 새 클라이언트 흐름에서는 이 테이블에 쓰지 않지만 기존 local/staging 행과 D1 복구 사본의 파기 여부는 별도 보존·삭제 검토 후 결정한다. 구형 위치 동의는 일반 API 접근 요건이 아니며, 새 위치 동의 부여 API는 기능 비활성 응답으로 거절한다. 기존 동의 철회 API는 온라인 잔여 위치 행 정리 경로로 유지한다.
 
 ## 9. API 계약
 
@@ -307,7 +276,7 @@ trigger는 수락뿐 아니라 요청 생성의 상호 제약과 부적절한 �
 | POST `/me/verification-requests` | 확인 요청 최소 정보 | 운영자 확인 대기. 학적 원본 업로드는 범위 밖 |
 | POST `/me/consents` | kind, policyVersion, granted | 동의/철회, 필요한 접근 즉시 해제 |
 | DELETE `/me` | 최근 5분 내 로그인 세션+CSRF | 본인 계정 탈퇴, 활동 종료·세션/위치 제거·직접 식별 정보 제거; 연결 이력·백업은 보관 정책에 따름 |
-| GET `/stops`, `/routes`, `/departments` | 없음 | 학교/캠퍼스별 활성 항목 |
+| GET `/stops`, `/routes`, `/departments` | 없음 | 학교/캠퍼스별 활성 항목. route의 origin stop이 대기 지점 |
 | PUT `/me/driver-profile` | 차량·확인 체크 항목 | 본인 등록, 승인 상태는 서버가 관리 |
 | GET `/trips` | routeId, desiredDepartureAt, genderFilter, preferSameDepartment, cursor | 자격·좌석·차단·양방향 성별 조건을 통과한 추천 목록, 최대 20개와 다음 커서 |
 | POST `/trips` | routeId, departureAt, seatCapacity, genderFilter, preferSameDepartment, `Idempotency-Key` | 운전자, OPEN 생성 |
@@ -325,10 +294,7 @@ trigger는 수락뿐 아니라 요청 생성의 상호 제약과 부적절한 �
 | POST `/trips/:tripId/complete` | expectedVersion | 운전자, 운행 완료 |
 | POST `/trips/:tripId/cancel` | expectedVersion, reasonCode | OPEN 운행 운전자 취소, 요청 취소와 잠금 해제 |
 | POST `/trips/:tripId/abort` | expectedVersion, reasonCode | 운전자/운영자 중단 |
-| PUT `/locations/me` | tripId, requestId?, lat, lng, accuracyM, capturedAt, sequence | 현재 공유가 허용된 본인만 |
-| GET `/locations/me` | 없음 | 본인 최신 위치 및 관계 종료/철회 뒤에도 최근 위치 제공 내역 20건, `no-store` |
-| POST `/locations/me/disclosures/ack` | disclosureIds (1~20) | 본인 소유의 제공 전·후 위치 안내를 이용자가 확인 버튼으로 확인, CSRF |
-| GET `/trips/:tripId/locations` | 없음 | 서버가 필터한 상대 위치. 새 sequence는 소유자 사전알림 확인 후 1회만 좌표 반환 |
+| `/locations/*`, `/trips/:tripId/locations` | 없음 | 위치 공유 기능 중지. 등록되지 않은 위치 API는 404 |
 | GET `/me/active-peers` | 없음 | 수락/탑승된 현재 관계에서 본인에게 허용된 동승 상대만 |
 | GET `/blocks` | 없음 | 본인이 차단한 사용자 목록, `no-store` |
 | POST `/blocks` | blockedUserId | 실제 동승 이력이 있는 상대를 차단, 관련 활동 처리·감사 기록 |
@@ -341,7 +307,7 @@ trigger는 수락뿐 아니라 요청 생성의 상호 제약과 부적절한 �
 | PATCH `/admin/reports/:reportId` | status | 운영자 전용 상태 전이·감사 기록 |
 | POST `/admin/users/:userId/suspend` | reason (1~500자) | 운영자 전용 계정 정지·세션/활동 회수·감사 기록 |
 | GET/POST/PATCH `/admin/stops`, `/admin/stops/:stopId` | 지점 목록·등록·수정 | 활성 운영자·동의·CSRF, 학교/캠퍼스 범위, 감사 이벤트, 활동 중 연결 운행은 수정 거절 |
-| GET/POST/PATCH `/admin/routes`, `/admin/routes/:routeId` | 노선 목록·등록·활성 변경 | 활성 운영자·동의·CSRF, 활성 교문→목적지만 허용, 감사 이벤트, 활동 중 운행은 변경 거절 |
+| GET/POST/PATCH `/admin/routes`, `/admin/routes/:routeId` | 노선 목록·등록·활성 변경 | 활성 운영자·동의·CSRF, 활성 승차 지점→목적지만 허용, 감사 이벤트, 활동 중 운행은 변경 거절 |
 
 운행 목록 DTO는 trip ID, 출발/도착 지점, 시간, 잔여 좌석, 운전자 닉네임, 같은 학과 여부, 조건 요약만 제공한다. 수락 전 차량 식별자·이메일·정확한 위치는 제공하지 않는다. 당사자 DTO도 본인의 관계에 필요한 정보만 포함한다. 탑승 코드는 별도 발급 응답 외 재노출하지 않는다.
 
@@ -361,17 +327,17 @@ trigger는 수락뿐 아니라 요청 생성의 상호 제약과 부적절한 �
 
 ## 10. 조회·성능·사용량
 
-활성 요청/탑승 화면은 상태와 허용된 위치를 5초 간격으로 조회한다. 운행 목록은 기본 15초 또는 사용자 새로고침, 숨겨진 화면은 중단한다. 네트워크 실패 시 5→10→20→30초 지수 backoff와 jitter를 적용한다. 자동 mutation 재시도는 같은 멱등키로만 한다.
+활성 요청/탑승 화면은 상태를 5초 간격으로 조회한다. 운행 목록은 기본 15초 또는 사용자 새로고침, 숨겨진 화면은 중단한다. 네트워크 실패 시 5→10→20→30초 지수 backoff와 jitter를 적용한다. 자동 mutation 재시도는 같은 멱등키로만 한다.
 
-초기 서버 제한은 위치 쓰기 10초당 1회/사용자, 운행 생성 10분당 5회, 요청 생성 1분당 5회, 코드 시도는 코드당 5회다. 그 외 API에도 계정·IP별 상한을 설정한다. Workers 요금제의 rate-limit 기능 사용 가능 여부를 확인하고, 미사용 시 D1의 기존 최신값/생성시각과 원자적 제한 카운터를 사용한다. Worker 메모리 제한만으로 전역 제한이 된다고 가정하지 않는다.
+초기 서버 제한은 운행 생성 10분당 5회, 요청 생성 1분당 5회, 코드 시도는 코드당 5회다. 그 외 API에도 계정·IP별 상한을 설정한다. Workers 요금제의 rate-limit 기능 사용 가능 여부를 확인하고, 미사용 시 D1 원자적 제한 카운터를 사용한다. Worker 메모리 제한만으로 전역 제한이 된다고 가정하지 않는다.
 
-활성 사용자 100명·10분을 단순 가정하면 5초 조회 약 12,000회, 10초 위치 쓰기 최대 약 6,000회다. 이는 산술 부하 예시이며 실측 성능·무료 제공량 주장이 아니다. 각 조회의 SQL 수, 인덱스, D1 읽기/쓰기 행 수, API 지연을 staging에서 측정하고 파일럿 규모를 정한다. 부하가 요구를 넘으면 주기/조회 결합을 먼저 조정하고 Durable Objects 등 확장을 별도 결정한다.
+활성 사용자 100명·10분을 단순 가정하면 5초 상태 조회 약 12,000회다. 이는 산술 부하 예시이며 실측 성능·무료 제공량 주장이 아니다. 각 조회의 SQL 수, 인덱스, D1 읽기/쓰기 행 수, API 지연을 staging에서 측정하고 파일럿 규모를 정한다. 부하가 요구를 넘으면 주기/조회 결합을 먼저 조정하고 Durable Objects 등 확장을 별도 결정한다.
 
 ## 11. 보안·개인정보·관측
 
 - TLS, 최소 권한의 Cloudflare 토큰, 환경별 비밀값, D1 접근 제한을 기본으로 한다.
 - 서비스 로그에는 추적 ID·오류 분류·지연·안전한 리소스 ID만 남긴다. callback URL query·위치 본문·코드 원문·이메일을 자동 로깅하지 않는다.
-- CSP는 선택한 지도/Google 흐름에 필요한 origin만 허용한다. `Permissions-Policy: geolocation=(self)`, 적절한 Referrer-Policy, MIME 보호, 프레임 삽입 제한을 적용한다.
+- CSP는 same-origin 리소스만 허용한다. 지도 SDK를 불러오지 않으며 `Permissions-Policy: geolocation=()`, Referrer-Policy, MIME 보호, 프레임 삽입 제한을 적용한다.
 - 운영자 조회·승인·제한·데이터 추출은 감사 기록과 최소 권한을 갖춘다. 운영 UI는 학생 화면과 경로·인가를 분리한다.
 - 이메일·성별·차량·운행·위치별 수집 목적과 보관 정책을 분리한다. 성별은 추천 조건 외 목적으로 사용하지 않는다.
 - 설계 초안의 일반 운행/감사/신고 보관 제안은 각각 90일/180일/처리 후 180일이다. 운영·법무 검토로 확정하고 법정 보존 항목은 별도 설정한다. 이 숫자를 법정 의무라고 안내하지 않는다.
@@ -380,8 +346,8 @@ trigger는 수락뿐 아니라 요청 생성의 상호 제약과 부적절한 �
 ## 12. 배포·migration·복구
 
 1. local에서 SQL migration과 합성 seed, Workers/D1 통합 테스트를 실행한다.
-2. staging D1에 동일 migration을 적용하고 OAuth redirect·쿠키·API JSON·지도 도메인 키를 검증한다.
-3. 실제 모바일 기기 두 대와 합성 학생 계정으로 요청→수락→위치→탑승→완료를 검증한다.
+2. staging D1에 동일 migration을 적용하고 OAuth redirect·쿠키·API JSON을 검증한다.
+3. 실제 모바일 기기 두 대와 합성 학생 계정으로 요청→수락→선택 지점에서 대기→탑승→완료를 검증한다.
 4. CI에서 lint·타입·단위/통합·핵심 E2E·빌드를 실행하고 결과를 보존한다.
 5. 출시 설정 검사가 학교 placeholder, 개발 인증, 잘못된 DB 바인딩, 미설정 Secrets를 거절하도록 한다.
 6. 운영 migration은 우선 컬럼/테이블 추가 방식으로 하며 이전/다음 Worker 버전과 호환시킨다. DB 변경 후 Worker를 배포한다.
@@ -397,7 +363,7 @@ trigger는 수락뿐 아니라 요청 생성의 상호 제약과 부적절한 �
 | 학교·계정 범위 | 가천대학교 글로벌캠퍼스(성남) 단일 서비스, `gachon.ac.kr` 메일, 학교 선택 UI 없음. 실제 Workspace `hd`는 staging OIDC callback에서 확인 | P0/P2 |
 | 서비스 계정 자격 | 정상 인증된 가천대학교 Google 계정이면 현재 재학생 여부와 관계없이 이용 자격을 부여한다. Google 재인증 주기는 세션 만료에 맞춰 7일 | P0 사용자 결정 및 staging OIDC claim 검증 완료 |
 | 운전자 확인 수단 | 학생 계정 자격과 별도로 차량·운전자 프로필은 운영자 승인 전 `PENDING` | P0/P3, 파일럿 전 필수 |
-| 지도 공급자 | 사용자 결정으로 NAVER Web Dynamic Map 선택, SDK 코드 연결. Client ID/호스트, primary 계정 무료 조건, 비용과 개인정보 처리 검토 대기 | P0/P5 |
+| 지도 공급자 | 현재 미사용. 화면에서 지도 SDK를 불러오지 않으며, 재도입은 별도 검토 필요 | 범위 변경 전 |
 | 같은 학과 우선 | 검증된 학과의 추천 순위 | P0 |
 | 성별 선택 의미 | 전체 동승자 간 양방향 조건 | P0 |
 | 보상·요금 | MVP 비활성, 향후 별도 결정 | 공개 서비스/보상 도입 전 |
@@ -434,7 +400,7 @@ P1의 API는 health와 접근 거부 응답이었다. P2에서는 조건부 Goog
 
 세션 쿠키에는 256비트 무작위 opaque 토큰만 담고 SHA-256 해시만 D1에 저장한다. 운영 쿠키는 `__Host-campus_session`과 `__Host-campus_oauth`, HTTPS `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`를 쓴다. localhost에서는 `campus_session` / `campus_oauth`를 사용한다. 세션 최대 수명은 7일, 유휴 만료는 24시간이고 사용자는 본인/ADMIN 조회·mutation마다 다시 읽어 정지 상태를 확인한다. 모든 응답은 `no-store`다. PATCH·검증 요청·로그아웃·관리자 판단은 exact Origin 및 세션 토큰에서 파생한 HMAC CSRF 토큰을 검증한다. 로컬 전용으로만 고정된 개발 HMAC fallback이 있고 원격 환경은 길이 확인된 `CSRF_HMAC_KEY` 없이는 503이다.
 
-`GET /api/v1/me`는 현재 요구되는 TERMS·PRIVACY 정책 버전, HTTPS 정책 URL, 확인 상태를 돌려준다. `POST /api/v1/me/consents`는 exact Origin·CSRF를 확인해 한 종류의 동의 또는 안내 확인을 저장하거나 철회한다. 현재 버전과 입력 버전이 다르면 409이며 이전 버전 확인은 접근을 허용하지 않는다. PRIVACY 확인은 처리방침을 안내받았다는 기록이지 포괄적 개인정보 처리 동의나 처리의 법적 근거를 대신하지 않는다. 위치 수집·제공은 목적별 별도 동의를 요구한다. 최신 TERMS·PRIVACY 상태가 없으면 학생 기능이 제한된다. `migrations/0003_consents.sql`의 부분 unique index는 같은 사용자·항목·버전에 대한 활성 기록 중복을 막는다. 로컬 합성 로그인은 실제 약관이 아닌 로컬 데모 문구와 `local-demo-v1`을 사용한다. 실제 Google OIDC는 local에서도 TERMS·PRIVACY 문서 버전과 HTTPS URL이 설정되어야 시작할 수 있다. 원격은 학교·OAuth 설정과 함께 위치 정책 두 종류의 버전·HTTPS URL도 요구한다.
+`GET /api/v1/me`는 현재 요구되는 TERMS·PRIVACY 정책 버전, HTTPS 정책 URL, 확인 상태를 돌려준다. `POST /api/v1/me/consents`는 exact Origin·CSRF를 확인해 한 종류의 동의 또는 안내 확인을 저장하거나 철회한다. 현재 버전과 입력 버전이 다르면 409이며 이전 버전 확인은 접근을 허용하지 않는다. PRIVACY 확인은 처리방침을 안내받았다는 기록이지 포괄적 개인정보 처리 동의나 처리의 법적 근거를 대신하지 않는다. 현 제품에는 위치 수집·제공 동의 UI가 없고 신규 위치 동의 부여는 거절된다. 기존 위치 동의 철회는 legacy 데이터 정리 경로로 남아 있다. 최신 TERMS·PRIVACY 상태가 없으면 학생 기능이 제한된다. `migrations/0003_consents.sql`의 부분 unique index는 같은 사용자·항목·버전에 대한 활성 기록 중복을 막는다. 로컬 합성 로그인은 실제 약관이 아닌 로컬 데모 문구와 `local-demo-v1`을 사용한다. 실제 Google OIDC는 local에서도 TERMS·PRIVACY 문서 버전과 HTTPS URL이 설정되어야 시작할 수 있다. 원격은 현재 TERMS·PRIVACY 설정을 요구한다.
 
 학교 Google `SCHOOL_ASSERTION` 모드에서는 새 계정이 별도 수동 확인 요청 없이 자격을 얻는다. `POST /api/v1/me/verification-requests` 및 `GET/PATCH /api/v1/admin/verification-requests`는 로컬 수동 모드와 기존 대기 기록을 위한 호환 경로로 남긴다. 학생 계정 검토와 별개로 차량·운전자 승인 대기열은 유지한다. 별도 HTTP로 ADMIN을 지정하는 수단은 없다. Google OAuth client와 Worker secret binding을 staging에 연결했고 실제 Workspace `hd` 일치를 확인했다. auth-test-only 모드는 성공 callback에서도 계정·세션을 만들지 않으며 일반 API를 차단한다. 사용자 지정 운영주체·문의처는 정책 초안에 반영했지만 학교 승인/위임, 사업자 분류, 법정 연락책임자, 실제 처리위탁/국외이전 상세와 법정 위치 통지 구현이 미확정이라 일반 staging 로그인은 아직 닫혀 있다.
 
@@ -478,7 +444,7 @@ npm run build
 
 ## 17. P3 운행 생성과 본인 조회 (2026-10-27)
 
-`GET /api/v1/routes`는 현재 학생 자격과 두 필수 동의, 사용자 학교·캠퍼스에 맞는 활성 교문→목적지 노선만 반환한다. `POST /api/v1/trips`는 exact Origin·CSRF·동의·학생 자격·차량 승인/유효기간·노선·정원·성별 설정을 검증한다. 출발은 서버 현재 시각부터 30분 이내이고 모집 만료는 출발+15분이다. 사용자의 성별·학과 검증 상태는 서버 DB에서 읽어 스냅샷으로 저장한다.
+`GET /api/v1/routes`는 현재 학생 자격과 두 필수 동의, 사용자 학교·캠퍼스에 맞는 활성 승차 지점→목적지 노선만 반환한다. `POST /api/v1/trips`는 exact Origin·CSRF·동의·학생 자격·차량 승인/유효기간·노선·정원·성별 설정을 검증한다. 출발은 서버 현재 시각부터 30분 이내이고 모집 만료는 출발+15분이다. 사용자의 성별·학과 검증 상태는 서버 DB에서 읽어 스냅샷으로 저장한다.
 
 요청의 `Idempotency-Key`와 정규화 본문 해시를 `(user_id, operation, key)`로 기록한다. 동일 본문 재시도는 이전 trip ID/status/version을 반환하고 다른 본문 충돌은 409다. 제한 정보는 멱등 응답에 저장하지 않는다. `migrations/0005_trip_creation.sql`의 BEFORE trigger가 현재 학생/차량 자격·활성 노선·정원·출발 시간·잠금을 다시 검사하고, AFTER trigger가 `active_user_locks`의 DRIVER 잠금을 같은 SQL statement에서 만든다. 동시 생성은 잠금 PK로 하나만 성공한다.
 
@@ -512,7 +478,9 @@ Workers/D1 검증은 수락과 완료의 동일 키 재시도, 다른 본문 제
 
 검색 UI는 탑승자 계정에서 필터와 페이지 추가를 제공하며 요청 생성 후 기존 활성 요청 화면으로 연결한다. Workers/D1 계약 테스트는 성별 충돌 검색 제외와 직접 요청 거절, 두 번째 승객 요청 충돌, 조건 해시가 다른 커서 거절, 22개 후보의 안정 페이지 정렬, 같은 학과 우선 ON/OFF를 확인한다. 단위 테스트는 성별 필터별 공개/미공개 조합과 그룹 양방향 조건을 확인한다.
 
-## 21. P5 위치 공유 로컬 구현 (2026-10-27)
+## 21. P5 위치 공유 로컬 구현 (2026-10-27, 폐기된 구현 기록)
+
+아래는 이전 실시간 위치 구현을 설명하는 기록이며 현재 동작을 나타내지 않는다. 2026-10-31 사용자 결정에 따라 API route, 좌표 schema, 위치·지도 runtime modules, 지도 설정과 위치 전용 unit tests를 제거했다. DB 테이블·migration, 동의 철회·탈퇴·정리 경로는 기존 데이터와 복구 사본 검토가 끝날 때까지 유지한다. 현재 요구사항은 §8, 변경 작업은 [Roadmap §7](Roadmap.md)을 기준으로 한다.
 
 `migrations/0011_location_share.sql`은 운행이 `IN_PROGRESS`로 바뀔 때 해당 운행의 모든 좌표를 삭제하고, 마지막 활성 승객 관계가 끝날 때 운전자 좌표도 삭제한다. 기존 요청·운행 종료 trigger는 각 승객 좌표 및 terminal 운행 좌표를 삭제한다. 위치 행은 사용자당 하나이며, 서버 수신 후 60초 TTL과 단조 증가 sequence를 사용한다.
 
@@ -524,7 +492,9 @@ Workers/D1 검증은 수락과 완료의 동일 키 재시도, 다른 본문 제
 
 `tests/integration/locations.test.ts`는 합성 D1에서 무동의·비관계 업로드 거절, 승객 상호 좌표 비노출, 시각/sequence/빈도 검증, `no-store`, 취소·동의 철회 삭제를 확인한다. `tests/integration/requests.test.ts`는 출발 전 좌표를 넣고 출발 시 삭제되는지 검증한다. Chromium E2E는 합성 geolocation을 사용한 운전자·승객 위치 공유 흐름을 확인한다. 2026-10-28 localhost 브라우저 smoke에서 NAVER SDK 응답 200과 Map 인스턴스 생성을 확인했으나 지도 타일 표시/인증은 확인하지 못했다. NCP 허용 호스트·비용 설정, 법적 정책 URL·문구 및 iOS Safari·Android Chrome 실기기 검증도 미완료라 P5를 완료 처리하지 않는다.
 
-## 22. 지도 공급자 비교와 NAVER 선택 (2026-10-28)
+## 22. 지도 공급자 비교와 NAVER 선택 (2026-10-28, 폐기된 선정 기록)
+
+아래는 과거 조사와 선정 기록이다. 현재 화면은 지도 SDK를 로드하지 않고 CSP에서도 지도 provider를 허용하지 않으며 SDK loader와 tracked·local client ID 설정도 제거했다. 재도입은 새 검토와 사용자 범위 결정을 거쳐야 한다.
 
 공식 문서는 웹 SDK 키 제한과 현재 공개된 쿼터/요금을 비교한다. 이 서비스는 정해진 두 점과 현재 위치 표시만 필요하므로 주소 검색·길찾기·장소 API는 MVP에 넣지 않는다.
 
@@ -540,7 +510,7 @@ NAVER의 대표 계정은 Maps를 먼저 이용한 계정이며, 개인 회원�
 
 Web Dynamic Map Application은 서비스 URL 등록이 필요하고 URL은 최대 10개까지 등록할 수 있다. 공식 문서는 `http://` 형식으로 입력하되 http/https는 구분하지 않고, `www`를 제외하며, 서브도메인이 있으면 대표 도메인을 입력하도록 안내한다. 따라서 URL을 등록하기 전에 Campus Ride의 custom hostname을 정한다. [Application URL 입력 규칙](https://guide.ncloud-docs.com/docs/maps-app)
 
-사용자 결정에 따라 NAVER Web Dynamic Map을 사용하며 `src/web/naver-map.ts`에서 공식 SDK를 `ncpKeyId`로 불러오고 지정 지점·허용된 위치·정확도 원을 표시한다. 사용자가 제공한 Client ID는 `.env.local`의 `VITE_NAVER_MAP_CLIENT_ID`로 설정했고 파일은 Git에 제외된다. 2026-10-28 localhost 브라우저 smoke에서 SDK 응답 200과 Map 인스턴스 생성을 확인했다. 초기 callback보다 `naver.maps` 객체가 늦게 붙는 SDK 동작을 로더에서 기다리도록 처리했다. 이 확인은 지도 타일이 실제 표시되거나 키의 사이트 제한이 올바르다는 뜻은 아니다. Web Dynamic Map 및 등록 호스트 설정은 NCP 콘솔에서 독립 확인하지 못했다. Cloudflare zone `jwjoo.com`은 활성 상태이나 Campus Ride custom hostname은 없다. staging host는 `campus-ride-staging.jwjoo0512.workers.dev`이며 NCP 안내는 서비스 URL에 포트/경로를 넣지 말고 서브도메인은 대표 도메인을 등록하라고 한다. NCP 계정의 Maps 대표 계정 여부와 실제 무료량·사용량 한도는 확인되지 않았으므로 무료 사용을 가정하지 않는다. 외부 지도 요청은 브라우저의 접속 IP와 표시 영역을 전달할 수 있어 처리 국가·보유·약관 고지를 확인해야 한다. 실제 타일 인증, 소유 도메인 등록, 캠퍼스 지도 품질, 정책 반영 및 iOS Safari/Android Chrome 실기기 시험은 P5 완료 조건으로 남는다.
+이전에는 NAVER Web Dynamic Map을 선택해 localhost에서 SDK 응답과 Map 인스턴스 생성을 확인했으나 타일 표시·키 제한·요금은 독립 확인하지 못했다. 2026-10-31 고정 지점 대기 방식으로 변경하면서 SDK 코드와 tracked·local 환경 설정을 제거했다. 이 공급자 선택은 현재 제품 계획이 아니며, NCP 호스트·요금·개인정보 설정과 모바일 지도 검증도 현행 P5 완료 조건이 아니다.
 
 ## 23. P6 신고 접수와 운영자 상태 처리 1차 (2026-10-27)
 
@@ -576,13 +546,13 @@ Workers/D1 통합 테스트는 비당사자·무CSRF 접수 거절, 신고 상�
 
 ## 27. P6 지점·노선 운영 1차 (2026-10-28)
 
-운영자 화면은 학교·캠퍼스에 묶인 지점을 등록·수정·비활성화하고, 활성 교문에서 활성 목적지로 가는 노선을 등록하거나 비활성화한다. 지점 삭제 API는 제공하지 않는다. 공개 운행 검색은 기존처럼 현재 확인된 학생에게 활성 노선만 반환한다. 관리자 지점 목록은 좌표를 포함해 `no-store`로 제공하며 승인된 운영자에게만 열린다.
+운영자 화면은 학교·캠퍼스에 묶인 지점을 등록·수정·비활성화하고, 활성 승차 지점에서 활성 목적지로 가는 노선을 등록하거나 비활성화한다. 지점 삭제 API는 제공하지 않는다. 공개 운행 검색은 현재 확인된 학생에게 활성 노선만 반환한다. 관리자 지점 목록은 좌표를 포함해 `no-store`로 제공하며 승인된 운영자에게만 열린다. local seed의 AI공학관·중앙도서관·반도체대학 좌표는 사용자가 제공한 Plus Code 셀 중심이다. 가상 교문·캠퍼스 좌표만 placeholder이며, 실좌표 입력은 현장 안전성이나 운영 승인을 뜻하지 않는다.
 
 `migrations/0015_admin_catalog.sql`은 변경을 `STOP_CREATED/UPDATED`, `ROUTE_CREATED/UPDATED` 감사 이벤트로만 적용하고, 직접 지점/노선 변경·삭제를 막는다. 학교·캠퍼스 범위는 현재 운영자 DB 관계에서 가져오며 요청자가 값을 지정하지 않는다. 노선은 올바른 종류와 활성 상태의 지점을 요구하고 동일 교문/목적지 중복을 거절한다. 연결된 운행이 `OPEN` 또는 `IN_PROGRESS`인 동안 지점 좌표/종류/활성 상태 및 노선 활성 상태 변경을 막는다. 로컬 전용 합성 seed에만 가상 운영자 로그인을 추가해 화면을 시험할 수 있다. 실제 학교 지점·좌표·노선 값은 제공되지 않아 생성하지 않는다.
 
 ## 28. P6 동의 관리와 계정 탈퇴 (2026-10-28)
 
-온보딩의 확인 화면은 TERMS, PRIVACY 안내, 위치 수집, 동승 상대 제공을 각각 표시한다. PRIVACY 확인은 처리방침 제공·확인 상태로 사용하며 법적 처리 근거를 대신하지 않는다. 위치 목적별 동의는 각각 선택·철회할 수 있다. 철회 때 관련 최신 좌표와 해당 이용자 위치의 제공 확인자료·위치 소유자 접근기록·presence를 온라인 DB에서 제거하고 이후 위치 접근을 막는다. 상대 위치를 조회한 보안 기록은 좌표 없이 위치 소유자별로 최대 1년 보관한다. 실제 HTTPS 문서 URL·버전이 없을 때는 로컬 데모 안내를 실제 법적 고지로 표시하지 않는다.
+현재 온보딩에서는 TERMS와 PRIVACY 안내만 확인하며 위치 동의 UI와 신규 위치 동의 부여는 비활성화했다. 기존 위치 동의 기록의 철회·계정 탈퇴 시 legacy 위치 행 정리 경로는 유지한다. 온라인 DB 정리가 D1 복구 사본의 개별 삭제를 뜻하지는 않는다. PRIVACY 확인은 처리방침 제공·확인 상태로 사용하며 법적 처리 근거를 대신하지 않는다. 실제 HTTPS 문서 URL·버전이 없을 때는 로컬 데모 안내를 실제 법적 고지로 표시하지 않는다.
 
 `DELETE /api/v1/me`는 exact Origin·CSRF와 로그인 시각 5분 이내를 요구한다. `migrations/0016_account_deletion.sql`은 `USER_DELETED` 이벤트 한 번으로 요청·운행을 종료하고, 세션·최신 좌표·학생 확인 자료·사용자 멱등 기록을 지운다. 이메일·Google sub는 대체값으로 바꾸고 닉네임·성별·학과를 초기화하며 차량 식별 정보도 덮어쓴다. 기존 동의는 철회한다. `0019_delete_related_identity.sql`은 관련 차단 관계를 제거하고 위치 제공 기록에 탈퇴 사용자가 수신자로 남은 닉네임을 `탈퇴한 사용자`로 바꾼다. 새 migration `0020`은 탈퇴·위치 동의 철회 때 본인 위치의 제공 확인자료와 위치 소유자 접근기록도 삭제한다. 180일 운행/요청, 종결 후 1년 신고/감사, 철회 후 1년 동의, 위치 확인자료 최소 6개월(관련 동의 철회 시 철회 범위를 지체 없이 삭제), 위치 API 접근기록 최대 1년, 탈퇴 표식 최소 1년의 온라인 정리를 `cleanupExpiredData`에 연결했다. 연결된 신고/활동이 남으면 필요한 행은 그 기록이 정리될 때까지 유지한다. D1 복구 사본은 개별 삭제되지 않아 이 운영 초안은 시행 전이다. 구체적인 일정은 [privacy policy](docs/policies/privacy.md) 및 [운영 복구 절차](docs/operations/data-retention-and-restore.md)를 따른다.
 
@@ -596,8 +566,8 @@ Cloudflare 공식 문서 기준 D1 Time Travel은 production storage backend에�
 
 ## 30. P6 Worker 보안 헤더와 계정별 제한 (2026-10-28)
 
-Hono `secureHeaders`는 same-origin 기본 CSP와 NAVER Maps SDK/지도 타일에 필요한 origin만 허용하고 `style-src-attr`는 SDK 오버레이 배치용 inline style만 허용한다. SDK 스크립트 요청은 등록 도메인 인증을 위해 origin만 referrer로 보낸다. `Permissions-Policy: geolocation=(self)`, `no-referrer`, `nosniff`도 유지한다. 요청 처리 경로는 애플리케이션 로그를 남기지 않는다. Cron 정리 작업은 outcome, 시도 횟수, 고정된 실패 단계, 예정 시각 대비 지연, 실행 시간만 구조화 로그에 남긴다. 오류 메시지나 D1 세부 정보는 기록하지 않는다. 실패하면 각 패스의 기존 행 한도를 유지한 전체 정리 패스를 한 번 재시도하고, 두 번째 실패는 일반 오류로 Cron 이벤트에 표시한다.
+Hono `secureHeaders`는 same-origin 기본 CSP를 사용하고 지도 SDK origin은 허용하지 않는다. `Permissions-Policy: geolocation=()`, `no-referrer`, `nosniff`도 유지한다. 요청 처리 경로는 애플리케이션 로그를 남기지 않는다. Cron 정리 작업은 outcome, 시도 횟수, 고정된 실패 단계, 예정 시각 대비 지연, 실행 시간만 구조화 로그에 남긴다. 오류 메시지나 D1 세부 정보는 기록하지 않는다. 실패하면 각 패스의 기존 행 한도를 유지한 전체 정리 패스를 한 번 재시도하고, 두 번째 실패는 일반 오류로 Cron 이벤트에 표시한다.
 
 운영자 확인에 따르면 Workers 플랜은 Free다. Cloudflare 공식 문서상 2026-11-30까지 Free Workers Logs는 하루 200,000 이벤트 한도와 3일 보존을 제공한다. 2026-12-01부터 적용되는 Observability 무료 한도는 하루 0.5GB 수집과 7일 보존이며, 한도 도달 시 추가 과금 대신 신규 로그 수집이 중단된다. Paid는 별도 포함량과 초과 요금이 있다. staging Worker 설정은 observability/logs enabled, log head sampling 1, persist true, invocation_logs false, redact_query_string true다. Cron 요약 로그는 5분 주기이고 사용자 요청·좌표 등은 애플리케이션 로그에 쓰지 않는다. 실제 로그 사용량은 측정하지 않았다. 근거: [Wrangler observability configuration](https://developers.cloudflare.com/workers/wrangler/configuration/#observability), [Workers Logs pricing and retention](https://developers.cloudflare.com/workers/observability/logs/workers-logs/), [Observability pricing from 2026-12-01](https://developers.cloudflare.com/observability/pricing/).
 
-기존 D1 제한은 탑승 요청 생성 5회/분, 위치 업로드 10회/분, 탑승 코드 발급 3회/분, 신고 접수 5회/시간이며 코드 검증은 요청당 5회 실패 시 잠근다. 제한 키에는 사용자 ID 대신 SHA-256 해시를 사용한다. Workers/D1 검증에 요청 생성·코드 발급·코드 시도·신고 한도 검사가 포함된다.
+현재 D1 제한은 탑승 요청 생성 5회/분, 탑승 코드 발급 3회/분, 신고 접수 5회/시간이며 코드 검증은 요청당 5회 실패 시 잠근다. 위치 업로드 10회/분 제한은 과거 route 설정 기록이며 위치 route는 제거됐다. 제한 키에는 사용자 ID 대신 SHA-256 해시를 사용한다. Workers/D1 검증에 요청 생성·코드 발급·코드 시도·신고 한도 검사가 포함된다.
