@@ -33,6 +33,7 @@ if (environment === 'production') {
       ...process.env,
       CLOUDFLARE_ENV: 'staging',
       VITE_STAGING_AUTH_TEST_ONLY: 'true',
+      VITE_STAGING_TEST_API_ENABLED: staging?.vars?.STAGING_TEST_API_ENABLED === 'true' ? 'true' : 'false',
     };
     const build = spawnSync('npm', ['run', 'build'], { stdio: 'inherit', env });
     if (build.status !== 0) {

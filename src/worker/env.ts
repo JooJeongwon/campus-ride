@@ -18,6 +18,9 @@ export const environmentSchema = z.object({
   SCHOOL_CONFIG_READY: z.enum(['true', 'false']),
   ALLOW_DEV_AUTH: z.enum(['true', 'false']),
   STAGING_AUTH_TEST_ONLY: z.enum(['true', 'false']).optional(),
+  STAGING_TEST_API_ENABLED: z.enum(['true', 'false']).optional(),
+  STAGING_TEST_EMAIL_ALLOWLIST: z.string().optional(),
+  STAGING_TEST_EXPIRES_AT: z.string().optional(),
   SCHOOL_ID: z.string().optional(),
   CAMPUS_ID: z.string().optional(),
   ALLOWED_EMAIL_DOMAINS: z.string().optional(),
@@ -46,6 +49,12 @@ export const environmentSchema = z.object({
   }
   if (value.STAGING_AUTH_TEST_ONLY === 'true' && value.APP_ENV !== 'staging') {
     context.addIssue({ code: 'custom', message: 'Auth-only mode is staging-only' });
+  }
+  if (value.STAGING_TEST_API_ENABLED === 'true' && (value.APP_ENV !== 'staging' || value.STAGING_AUTH_TEST_ONLY !== 'true')) {
+    context.addIssue({ code: 'custom', message: 'Staging test access requires the staging auth-only safety gate' });
+  }
+  if (value.STAGING_AUTH_TEST_ONLY !== 'true' && (value.STAGING_TEST_EMAIL_ALLOWLIST || value.STAGING_TEST_EXPIRES_AT)) {
+    context.addIssue({ code: 'custom', message: 'Staging test account settings require auth-only mode' });
   }
   for (const [versionKey, urlKey] of [
     ['POLICY_TERMS_VERSION', 'POLICY_TERMS_URL'],
@@ -77,7 +86,8 @@ export const environmentSchema = z.object({
     || ['.invalid', '.example', '.test', '.localhost', '.local'].some((suffix) => origin.hostname.endsWith(suffix))) {
     context.addIssue({ code: 'custom', message: 'Remote origin must be an HTTPS domain' });
   }
-  if (Object.values(value).some((entry) => typeof entry === 'string' && /^(synthetic|replace|test|demo|your-|placeholder|example)/i.test(entry))) {
+  if (Object.entries(value).some(([key, entry]) => key !== 'STAGING_TEST_EMAIL_ALLOWLIST'
+    && typeof entry === 'string' && /^(synthetic|replace|test|demo|your-|placeholder|example)/i.test(entry))) {
     context.addIssue({ code: 'custom', message: 'Placeholder configuration cannot enable a remote environment' });
   }
   if (value.STAGING_AUTH_TEST_ONLY === 'true') {
@@ -92,6 +102,22 @@ export const environmentSchema = z.object({
     }
     if (value.GOOGLE_CLIENT_ID && !value.GOOGLE_CLIENT_ID.endsWith('.apps.googleusercontent.com')) {
       context.addIssue({ code: 'custom', message: 'GOOGLE_CLIENT_ID is not a Google web client ID' });
+    }
+    if (value.STAGING_TEST_API_ENABLED === 'true') {
+      const accounts = value.STAGING_TEST_EMAIL_ALLOWLIST?.split(',').map((email) => email.trim().toLowerCase()) ?? [];
+      const expiresAt = Number(value.STAGING_TEST_EXPIRES_AT);
+      if (accounts.length !== 2 || new Set(accounts).size !== 2
+        || accounts.some((email) => !/^[^@\s]+@gachon\.ac\.kr$/.test(email))) {
+        context.addIssue({ code: 'custom', message: 'Staging API test mode requires exactly two Gachon test accounts' });
+      }
+      if (!Number.isSafeInteger(expiresAt) || expiresAt <= Date.now() || expiresAt > Date.now() + 4 * 60 * 60 * 1000) {
+        context.addIssue({ code: 'custom', message: 'Staging API test mode must expire within four hours' });
+      }
+      if ((value.BOARDING_HMAC_KEY?.length ?? 0) < 32) {
+        context.addIssue({ code: 'custom', message: 'Staging API test mode requires a boarding-code key' });
+      }
+    } else if (value.STAGING_TEST_EMAIL_ALLOWLIST || value.STAGING_TEST_EXPIRES_AT) {
+      context.addIssue({ code: 'custom', message: 'Staging test account settings require test mode to be enabled' });
     }
     return;
   }
@@ -167,13 +193,28 @@ export function allowedDomains(value: string | undefined): string[] {
   return value?.split(',').map((domain) => domain.trim().toLowerCase()).filter(Boolean) ?? [];
 }
 
+export function stagingTestModeActive(env: Pick<Bindings,
+  'APP_ENV' | 'STAGING_AUTH_TEST_ONLY' | 'STAGING_TEST_API_ENABLED' | 'STAGING_TEST_EXPIRES_AT'>, now = Date.now()): boolean {
+  const expiresAt = Number(env.STAGING_TEST_EXPIRES_AT);
+  return env.APP_ENV === 'staging' && env.STAGING_AUTH_TEST_ONLY === 'true'
+    && env.STAGING_TEST_API_ENABLED === 'true' && Number.isSafeInteger(expiresAt) && now < expiresAt;
+}
+
+export function isStagingTestEmailAllowed(env: Pick<Bindings,
+  'APP_ENV' | 'STAGING_AUTH_TEST_ONLY' | 'STAGING_TEST_API_ENABLED' | 'STAGING_TEST_EMAIL_ALLOWLIST' | 'STAGING_TEST_EXPIRES_AT'>,
+email: string, now = Date.now()): boolean {
+  return stagingTestModeActive(env, now)
+    && (env.STAGING_TEST_EMAIL_ALLOWLIST ?? '').split(',').map((item) => item.trim().toLowerCase()).includes(email.trim().toLowerCase());
+}
+
 export function consentPolicies(env: Pick<Bindings,
   'POLICY_TERMS_VERSION' | 'POLICY_TERMS_URL' | 'POLICY_PRIVACY_VERSION' | 'POLICY_PRIVACY_URL'
-  | 'POLICY_LOCATION_COLLECTION_VERSION' | 'POLICY_LOCATION_COLLECTION_URL'
+  | 'STAGING_TEST_API_ENABLED' | 'POLICY_LOCATION_COLLECTION_VERSION' | 'POLICY_LOCATION_COLLECTION_URL'
   | 'POLICY_LOCATION_SHARING_VERSION' | 'POLICY_LOCATION_SHARING_URL'>) {
+  const testOnly = env.STAGING_TEST_API_ENABLED === 'true';
   return {
-    TERMS: { version: env.POLICY_TERMS_VERSION || 'local-demo-v1', url: env.POLICY_TERMS_URL || null },
-    PRIVACY: { version: env.POLICY_PRIVACY_VERSION || 'local-demo-v1', url: env.POLICY_PRIVACY_URL || null },
+    TERMS: { version: env.POLICY_TERMS_VERSION || (testOnly ? 'staging-test-terms-v1' : 'local-demo-v1'), url: env.POLICY_TERMS_URL || null },
+    PRIVACY: { version: env.POLICY_PRIVACY_VERSION || (testOnly ? 'staging-test-privacy-v1' : 'local-demo-v1'), url: env.POLICY_PRIVACY_URL || null },
     LOCATION_COLLECTION: {
       version: env.POLICY_LOCATION_COLLECTION_VERSION || 'local-location-v1',
       url: env.POLICY_LOCATION_COLLECTION_URL || null,

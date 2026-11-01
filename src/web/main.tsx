@@ -4,7 +4,7 @@ import { healthResponse } from '../shared/api';
 import { devLoginSchema, driverProfileDecisionSchema, driverProfileSchema, profileUpdateSchema, verificationDecisionSchema } from '../shared/auth';
 import { adminRouteCreateSchema, adminRouteUpdateSchema, adminStopSchema } from '../shared/admin';
 import { reportCreateSchema, suspendUserSchema } from '../shared/moderation';
-import { rideRequestCreateSchema, tripCreateSchema, tripSearchResponseSchema, tripSearchSchema, type TripMatch, type TripSearchInput } from '../shared/trips';
+import { ridePostingCreateSchema } from '../shared/trips';
 import './style.css';
 
 function seoulDateTimeInput(timestamp: number) {
@@ -46,7 +46,11 @@ function App() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const profileRevision = useRef(0);
   const [routes, setRoutes] = useState<Array<{ id: string; originName: string; destinationName: string }>>([]);
+  const [ridePage, setRidePage] = useState<'RIDER' | 'DRIVER'>('RIDER');
   const [searchRouteId, setSearchRouteId] = useState('');
+  const [ridePosting, setRidePosting] = useState<{ id: string; routeId: string; desiredDepartureAt: number; expiresAt: number; version: number; originName: string; destinationName: string } | null>(null);
+  const [ridePostingList, setRidePostingList] = useState<Array<{ id: string; routeId: string; desiredDepartureAt: number; expiresAt: number; riderNickname: string; originName: string; destinationName: string; sameDepartment: boolean; conditionsCompatible: boolean; matchReasons: Array<'SAME_DEPARTMENT' | 'DEPARTURE_TIME'> }>>([]);
+  const [postingBusy, setPostingBusy] = useState(false);
   const [tripRequests, setTripRequests] = useState<Array<{ id: string; riderId: string; desiredDepartureAt: number; status: string; expiresAt: number; acceptedAt: number | null; boardedAt: number | null; version: number; riderNickname: string; sameDepartment: boolean; matchReasons: Array<'SAME_DEPARTMENT' | 'DEPARTURE_TIME'>; conditionsCompatible: boolean }>>([]);
   const [adminReports, setAdminReports] = useState<AdminReport[]>([]);
   const [adminVerifications, setAdminVerifications] = useState<AdminVerificationRequest[]>([]);
@@ -58,16 +62,11 @@ function App() {
   const [reportableRequests, setReportableRequests] = useState<ReportableRequest[]>([]);
   const [activePeers, setActivePeers] = useState<ActivePeer[]>([]);
   const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
-  const [tripMatches, setTripMatches] = useState<TripMatch[]>([]);
-  const [searchFilters, setSearchFilters] = useState<TripSearchInput | null>(null);
-  const [searchCursor, setSearchCursor] = useState<string | null>(null);
-  const [searchBusy, setSearchBusy] = useState(false);
   const [boardingCodes, setBoardingCodes] = useState<Record<string, { code: string; expiresAt: number }>>({});
   const [message, setMessage] = useState('');
   const [consentBusy, setConsentBusy] = useState(false);
-  const [tripBusy, setTripBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
-  const tripIdempotency = useRef<{ body: string; key: string } | null>(null);
+  const postingIdempotency = useRef<{ body: string; key: string } | null>(null);
   const reportKeys = useRef(new Map<string, string>());
   const commandKeys = useRef(new Map<string, string>());
   async function refreshMe(revision = profileRevision.current) {
@@ -85,6 +84,18 @@ function App() {
       const data = (await response.json() as { data: typeof tripRequests }).data;
       if (revision === profileRevision.current) setTripRequests(data);
     }
+  }
+  async function refreshRidePosting(revision = profileRevision.current, signal?: AbortSignal) {
+    const response = await fetch('/api/v1/ride-postings/mine', { signal, cache: 'no-store' });
+    if (!response.ok) return;
+    const data = (await response.json() as { data: typeof ridePosting }).data;
+    if (revision === profileRevision.current && !signal?.aborted) setRidePosting(data);
+  }
+  async function refreshRidePostingList(revision = profileRevision.current, signal?: AbortSignal) {
+    const response = await fetch('/api/v1/ride-postings', { signal, cache: 'no-store' });
+    if (!response.ok) return;
+    const data = (await response.json() as { data: typeof ridePostingList }).data;
+    if (revision === profileRevision.current && !signal?.aborted) setRidePostingList(data);
   }
   async function refreshAdminReports(revision = profileRevision.current) {
     const response = await fetch('/api/v1/admin/reports', { cache: 'no-store' });
@@ -454,99 +465,43 @@ function App() {
       return;
     }
     await refreshMe();
-    setMessage('차량 정보를 저장했습니다. 승인 전에는 운행을 만들 수 없습니다.');
+    setMessage('차량 정보를 저장했습니다. 승인된 차량만 탑승 희망을 선택할 수 있습니다.');
   }
-  async function createTrip(form: FormData) {
-    if (!profile || tripBusy) return;
-    const revision = profileRevision.current;
-    const input = tripCreateSchema.parse({
-      routeId: form.get('routeId'), departureAt: Date.parse(`${String(form.get('departureAt'))}+09:00`),
-      seatCapacity: Number(form.get('seatCapacity')), genderFilter: form.get('genderFilter'),
-      preferSameDepartment: form.get('preferSameDepartment') === 'on',
-    });
-    const body = JSON.stringify(input);
-    if (!tripIdempotency.current || tripIdempotency.current.body !== body) {
-      tripIdempotency.current = { body, key: crypto.randomUUID() };
-    }
-    setTripBusy(true);
-    try {
-      const response = await fetch('/api/v1/trips', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': profile.csrfToken, 'Idempotency-Key': tripIdempotency.current.key },
-        body,
-      });
-      if (!response.ok) {
-        setMessage(response.status === 409 ? '이미 진행 중인 활동이 있거나 운행 조건이 변경되었습니다.' : '학생·차량 승인과 운행 조건을 확인해 주세요.');
-        return;
-      }
-      const me = await fetch('/api/v1/me', { cache: 'no-store' });
-      if (!me.ok) {
-        setMessage('운행은 등록됐습니다. 최신 상태를 확인하려면 화면을 새로고침해 주세요.');
-        return;
-      }
-      const updatedProfile = (await me.json() as { data: typeof profile }).data;
-      if (revision !== profileRevision.current) return;
-      setProfile(updatedProfile);
-      tripIdempotency.current = null;
-      setMessage('운행을 등록했습니다. 운행 ID를 탑승자와 공유해 주세요.');
-    } catch {
-      setMessage('연결이 끊겼습니다. 같은 내용을 다시 보내면 기존 등록 결과를 확인합니다.');
-    } finally {
-      setTripBusy(false);
-    }
-  }
-  async function loadTrips(filters: TripSearchInput, cursor: string | null = null) {
-    if (searchBusy) return;
-    const params = new URLSearchParams({
-      routeId: filters.routeId, desiredDepartureAt: String(filters.desiredDepartureAt),
-      genderFilter: filters.genderFilter, preferSameDepartment: String(filters.preferSameDepartment),
-      ...(cursor ? { cursor } : {}),
-    });
-    setSearchBusy(true);
-    try {
-      const response = await fetch(`/api/v1/trips?${params}`, { cache: 'no-store' });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        setMessage(response.status === 409 ? '검색 이후 조건이 바뀌었습니다. 다시 검색해 주세요.' : '운행을 찾지 못했습니다. 조건을 확인해 주세요.');
-        return;
-      }
-      const parsed = tripSearchResponseSchema.safeParse(payload);
-      if (!parsed.success) {
-        setMessage('운행 검색 결과를 읽지 못했습니다. 다시 검색해 주세요.');
-        return;
-      }
-      setTripMatches((previous) => cursor ? [...previous, ...parsed.data.data] : parsed.data.data);
-      setSearchFilters(filters);
-      setSearchCursor(parsed.data.nextCursor);
-      setMessage(parsed.data.data.length || cursor ? '' : '현재 조건에 맞는 운행이 없습니다. 조건을 바꾸거나 나중에 다시 검색해 주세요.');
-    } catch {
-      setMessage('연결이 끊겼습니다. 검색을 다시 시도해 주세요.');
-    } finally {
-      setSearchBusy(false);
-    }
-  }
-  async function searchTrips(form: FormData) {
-    const parsed = tripSearchSchema.safeParse({
-      routeId: form.get('routeId'),
-      desiredDepartureAt: Date.parse(`${String(form.get('desiredDepartureAt'))}+09:00`),
+  async function createRidePosting(form: FormData) {
+    if (!profile || postingBusy || ridePosting) return;
+    const input = ridePostingCreateSchema.parse({
+      routeId: form.get('routeId'), desiredDepartureAt: Date.parse(`${String(form.get('desiredDepartureAt'))}+09:00`),
       genderFilter: form.get('genderFilter'), preferSameDepartment: form.get('preferSameDepartment') === 'on',
     });
-    if (!parsed.success) {
-      setMessage('노선·희망 시각·매칭 조건을 확인해 주세요.');
-      return;
+    const body = JSON.stringify(input);
+    if (!postingIdempotency.current || postingIdempotency.current.body !== body) {
+      postingIdempotency.current = { body, key: crypto.randomUUID() };
     }
-    setTripMatches([]);
-    setSearchCursor(null);
-    await loadTrips(parsed.data);
+    setPostingBusy(true);
+    try {
+      const response = await fetch('/api/v1/ride-postings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': profile.csrfToken, 'Idempotency-Key': postingIdempotency.current.key },
+        body,
+      });
+      const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+      if (!response.ok) {
+        setMessage(payload?.error?.message ?? '탑승 희망을 등록하지 못했습니다. 조건을 확인해 주세요.');
+        return;
+      }
+      postingIdempotency.current = null;
+      await refreshRidePosting();
+      setMessage('탑승 희망을 등록했습니다. 운전자가 선택하면 탑승이 확정됩니다.');
+    } catch {
+      setMessage('연결이 끊겼습니다. 같은 내용으로 다시 시도하면 기존 등록 결과를 확인합니다.');
+    } finally {
+      setPostingBusy(false);
+    }
   }
-  async function requestMatch(trip: TripMatch) {
-    if (!searchFilters) return;
-    const body = rideRequestCreateSchema.parse({
-      desiredDepartureAt: searchFilters.desiredDepartureAt,
-      genderFilter: searchFilters.genderFilter,
-      preferSameDepartment: searchFilters.preferSameDepartment,
-    });
-    await mutate(`/api/v1/trips/${trip.id}/requests`, body, '탑승 요청을 보냈습니다.');
+  async function cancelRidePosting(posting: NonNullable<typeof ridePosting>) {
+    const cancelled = await mutate(`/api/v1/ride-postings/${posting.id}/cancel`,
+      { expectedVersion: posting.version }, '탑승 희망 등록을 취소했습니다.');
+    if (cancelled) setRidePosting(null);
   }
   async function issueBoardingCode(requestId: string) {
     if (!profile || actionBusy) return;
@@ -626,7 +581,9 @@ function App() {
     setProfile(null);
     setTripRequests([]);
     setConsentBusy(false);
-    setTripBusy(false);
+    setRidePosting(null);
+    setRidePostingList([]);
+    setPostingBusy(false);
     setMessage('로그아웃했습니다.');
   }
   async function deleteAccount() {
@@ -654,18 +611,30 @@ function App() {
     }
   }
   const canUseProfile = Boolean(!consentBusy && profile?.requiredConsents.TERMS.accepted && profile.requiredConsents.PRIVACY.accepted);
-  const canRegisterDriver = Boolean(canUseProfile && profile?.affiliation.status === 'VERIFIED'
+  const canRegisterDriver = Boolean(canUseProfile && profile?.role === 'STUDENT' && profile.affiliation.status === 'VERIFIED'
     && (profile.affiliation.verifiedUntil ?? 0) > Date.now());
   const hasBlockingActivity = Boolean(profile?.activeActivity
     && !(profile.activeActivity.role === 'DRIVER' && profile.activeTrip?.status === 'EXPIRED'));
-  const canCreateTrip = Boolean(canRegisterDriver && profile?.driverProfile?.verificationStatus === 'VERIFIED'
-    && (profile.driverProfile.verifiedUntil ?? 0) > Date.now() && !hasBlockingActivity);
+  const driverVerified = Boolean(canRegisterDriver && profile?.driverProfile?.verificationStatus === 'VERIFIED'
+    && (profile.driverProfile.verifiedUntil ?? 0) > Date.now());
+  const canSelectPosting = Boolean(driverVerified && (!hasBlockingActivity
+    || (profile?.activeActivity?.role === 'DRIVER' && profile.activeTrip?.status === 'OPEN' && profile.activeTrip.remainingSeats > 0)));
   const canRequestRide = Boolean(canRegisterDriver && !hasBlockingActivity);
+  const canPostRide = Boolean(canRequestRide && !ridePosting);
   const waitingPoint = profile?.activeActivity?.role === 'DRIVER'
     ? profile.activeTrip?.originName
     : profile?.activeRequest?.originName;
-  const tripDepartureMin = seoulDateTimeInput(Math.ceil(Date.now() / 60_000) * 60_000);
-  const tripDepartureMax = seoulDateTimeInput(Date.now() + 30 * 60_000);
+  const desiredDepartureMin = seoulDateTimeInput(Date.now());
+  const desiredDepartureMax = seoulDateTimeInput(Date.now() + 30 * 60_000);
+  useEffect(() => {
+    setRidePage('RIDER');
+    setRidePosting(null);
+    setRidePostingList([]);
+  }, [profile?.id]);
+  useEffect(() => {
+    if (profile?.activeActivity?.role === 'DRIVER') setRidePage('DRIVER');
+    if (profile?.activeActivity?.role === 'RIDER') setRidePage('RIDER');
+  }, [profile?.activeActivity?.role]);
   useEffect(() => {
     if (!canRequestRide || hasBlockingActivity) {
       setRoutes([]);
@@ -697,6 +666,56 @@ function App() {
       .catch(() => { if (!controller.signal.aborted) setTripRequests([]); });
     return () => controller.abort();
   }, [profile?.activeTrip?.id, profile?.activeActivity?.role]);
+  useEffect(() => {
+    if (!profile || profile.role !== 'STUDENT' || ridePage !== 'RIDER' || profile.activeActivity || !canRequestRide) {
+      setRidePosting(null);
+      return;
+    }
+    let stopped = false;
+    let loading = false;
+    const revision = profileRevision.current;
+    const controller = new AbortController();
+    const poll = async () => {
+      if (stopped || loading || revision !== profileRevision.current || document.visibilityState !== 'visible') return;
+      loading = true;
+      try {
+        const me = await fetch('/api/v1/me', { signal: controller.signal, cache: 'no-store' });
+        if (me.ok && !stopped && revision === profileRevision.current) {
+          const data = (await me.json() as { data: typeof profile }).data;
+          setProfile(data);
+          if (data?.activeActivity) return;
+        }
+        await refreshRidePosting(revision, controller.signal);
+      } catch {
+        // Keep the last server state visible during a temporary connection failure.
+      } finally {
+        loading = false;
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => { void poll(); }, 5_000);
+    return () => { stopped = true; window.clearInterval(timer); controller.abort(); };
+  }, [profile?.id, profile?.activeActivity?.role, ridePage, canRequestRide]);
+  useEffect(() => {
+    if (!profile || profile.role !== 'STUDENT' || ridePage !== 'DRIVER' || !driverVerified) {
+      setRidePostingList([]);
+      return;
+    }
+    let stopped = false;
+    let loading = false;
+    const revision = profileRevision.current;
+    const controller = new AbortController();
+    const poll = async () => {
+      if (stopped || loading || revision !== profileRevision.current || document.visibilityState !== 'visible') return;
+      loading = true;
+      try { await refreshRidePostingList(revision, controller.signal); } catch {
+        // Keep the last server state visible during a temporary connection failure.
+      } finally { loading = false; }
+    };
+    void poll();
+    const timer = window.setInterval(() => { void poll(); }, 5_000);
+    return () => { stopped = true; window.clearInterval(timer); controller.abort(); };
+  }, [profile?.id, profile?.driverProfile?.verificationStatus, ridePage, driverVerified, profile?.activeTrip?.id]);
   useEffect(() => {
     if (!profile?.activeActivity || actionBusy) return;
     let loading = false;
@@ -737,20 +756,39 @@ function App() {
     <section aria-labelledby="development-title">
       <h2 id="development-title">개발 환경 준비 중</h2>
       <p role="status">{status}</p>
+      <p aria-live="polite">{message}</p>
       {profile ? <>
         <h3>{profile.nickname}</h3>
         <p>학생 확인: {profile.affiliation.status} · 학과: {profile.department.status}</p>
+        {profile.role === 'STUDENT' && <nav className="ride-page-nav" aria-label="동승 이용 화면">
+          <button type="button" aria-pressed={ridePage === 'RIDER'}
+            disabled={hasBlockingActivity && profile.activeActivity?.role === 'DRIVER'} onClick={() => setRidePage('RIDER')}>탑승자 페이지</button>
+          <button type="button" aria-pressed={ridePage === 'DRIVER'}
+            disabled={hasBlockingActivity && profile.activeActivity?.role === 'RIDER'} onClick={() => setRidePage('DRIVER')}>운전자 페이지</button>
+        </nav>}
+        {profile.role === 'STUDENT' && <div className="ride-page-intro">
+          <h2>{ridePage === 'RIDER' ? '탑승자 페이지' : '운전자 페이지'}</h2>
+          <p>{ridePage === 'RIDER'
+            ? '승차 지점과 희망 시각을 등록하면 운전자가 선택해 탑승을 확정합니다.'
+            : '승인된 차량으로 탑승 희망을 살펴보고 운행을 선택합니다.'}</p>
+        </div>}
         <section aria-labelledby="consent-title">
           <h3 id="consent-title">약관·개인정보 확인</h3>
-          <p>서비스 이용약관 확인과 개인정보 처리방침 확인이 필요합니다. 처리방침 확인은 별도의 개인정보 처리 동의를 대신하지 않습니다. 현재는 단말 GPS를 수집하거나 동승 상대에게 실시간 좌표를 제공하지 않습니다.</p>
+          <p>{import.meta.env.VITE_STAGING_TEST_API_ENABLED === 'true'
+            ? '임시 기술 테스트입니다. Google 계정 식별자·이메일·프로필·요청/운행 기록이 staging D1에 저장되며, 삭제 후 복구 사본에 최대 7일 남을 수 있습니다. 아래 확인은 실제 약관이나 개인정보 처리방침 동의가 아닙니다. 단말 GPS와 실시간 좌표는 수집하지 않습니다.'
+            : '서비스 이용약관 확인과 개인정보 처리방침 확인이 필요합니다. 처리방침 확인은 별도의 개인정보 처리 동의를 대신하지 않습니다. 현재는 단말 GPS를 수집하거나 동승 상대에게 실시간 좌표를 제공하지 않습니다.'}</p>
           {(['TERMS', 'PRIVACY'] as const).map((kind) => {
             const policy = profile.requiredConsents[kind];
-            const title = kind === 'TERMS' ? '서비스 이용 약관' : '개인정보 처리방침 확인';
+            const title = import.meta.env.VITE_STAGING_TEST_API_ENABLED === 'true'
+              ? kind === 'TERMS' ? '임시 테스트 이용 안내' : '임시 테스트 데이터 처리 안내'
+              : kind === 'TERMS' ? '서비스 이용 약관' : '개인정보 처리방침 확인';
             return <div className="consent-row" key={kind}>
               <label><input type="checkbox" checked={policy.accepted} disabled={consentBusy}
                 onChange={(event) => void updateConsent(kind, event.currentTarget.checked)} /> {title} ({policy.version})</label>
               {policy.url ? <a href={policy.url} target="_blank" rel="noreferrer">내용 보기</a>
-                : <p>로컬 개발용 확인입니다. 실제 약관이나 개인정보 처리 안내가 아니며 합성 계정만 사용합니다.</p>}
+                : <p>{import.meta.env.VITE_STAGING_TEST_API_ENABLED === 'true'
+                  ? '임시 기술 검증용 확인이며 실제 서비스 약관·개인정보 처리방침이 아닙니다.'
+                  : '로컬 개발용 확인입니다. 실제 약관이나 개인정보 처리 안내가 아니며 합성 계정만 사용합니다.'}</p>}
             </div>;
           })}
         </section>
@@ -760,9 +798,9 @@ function App() {
           <button type="submit" disabled={!canUseProfile}>프로필 저장</button>
         </form>
         {profile.affiliation.status !== 'VERIFIED' && <button type="button" disabled={!canUseProfile} onClick={() => void requestVerification()}>학생 확인 요청</button>}
-        {profile.driverProfile && <p>차량 확인: {profile.driverProfile.verificationStatus}
+        {ridePage === 'DRIVER' && profile.driverProfile && <p>차량 확인: {profile.driverProfile.verificationStatus}
           {profile.driverProfile.verifiedUntil ? ` · 유효기간 ${new Date(profile.driverProfile.verifiedUntil).toLocaleDateString('ko-KR')}` : ''}</p>}
-        {profile.activeTrip && <section aria-labelledby="active-trip-title">
+        {ridePage === 'DRIVER' && profile.activeTrip && <section aria-labelledby="active-trip-title">
           <h3 id="active-trip-title">내 운행</h3>
           <p>{profile.activeTrip.originName} → {profile.activeTrip.destinationName}</p>
           <p>출발 {new Date(profile.activeTrip.departureAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })} · 남은 좌석 {profile.activeTrip.remainingSeats}석</p>
@@ -771,7 +809,8 @@ function App() {
           <button type="button" onClick={() => void navigator.clipboard.writeText(profile.activeTrip!.id)
             .then(() => setMessage('운행 ID를 복사했습니다.')).catch(() => setMessage('운행 ID를 직접 복사해 주세요.'))}>운행 ID 복사</button>
           {profile.activeTrip.status === 'OPEN' && <div className="actions">
-            <button type="button" disabled={actionBusy || !tripRequests.some((item) => item.status === 'BOARDED')
+            <button type="button" disabled={actionBusy || Date.now() < profile.activeTrip.departureAt
+              || !tripRequests.some((item) => item.status === 'BOARDED')
               || tripRequests.some((item) => item.status === 'ACCEPTED')}
               onClick={() => void mutate(`/api/v1/trips/${profile.activeTrip!.id}/start`, { expectedVersion: profile.activeTrip!.version }, '운행을 시작했습니다.')}>출발</button>
             <button type="button" disabled={actionBusy || tripRequests.some((item) => item.status === 'BOARDED')}
@@ -779,6 +818,8 @@ function App() {
             {tripRequests.some((item) => item.status === 'BOARDED') && <button type="button" disabled={actionBusy}
               onClick={() => void mutate(`/api/v1/trips/${profile.activeTrip!.id}/abort`, { expectedVersion: profile.activeTrip!.version, reasonCode: 'DRIVER_ABORT' }, '운행을 중단했습니다. 탑승자와 안전을 확인해 주세요.')}>운행 중단</button>}
           </div>}
+          {profile.activeTrip.status === 'OPEN' && Date.now() < profile.activeTrip.departureAt
+            && <p>출발 예정 시각이 되고 탑승 확인이 끝나면 출발할 수 있습니다.</p>}
           {profile.activeTrip.status === 'IN_PROGRESS' && <div className="actions">
             <button type="button" disabled={actionBusy}
               onClick={() => void mutate(`/api/v1/trips/${profile.activeTrip!.id}/complete`, { expectedVersion: profile.activeTrip!.version }, '운행을 완료했습니다.')}>운행 완료</button>
@@ -786,7 +827,7 @@ function App() {
               onClick={() => void mutate(`/api/v1/trips/${profile.activeTrip!.id}/abort`, { expectedVersion: profile.activeTrip!.version, reasonCode: 'DRIVER_ABORT' }, '운행을 중단했습니다. 탑승자와 안전을 확인해 주세요.')}>운행 중단</button>
           </div>}
           {['OPEN', 'IN_PROGRESS'].includes(profile.activeTrip.status) && <div aria-live="polite">
-            <h4>탑승 요청</h4>
+            <h4>확정된 탑승자</h4>
             {tripRequests.length ? <ul>{tripRequests.map((request) => <li key={request.id}>
               <p>{request.riderNickname} · {request.status} · 희망 출발 {new Date(request.desiredDepartureAt).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul' })}
                 {request.sameDepartment ? ' · 같은 학과' : ''} · 출발 시각 조건 일치</p>
@@ -822,7 +863,7 @@ function App() {
             </li>)}</ul> : <p>아직 요청이 없습니다.</p>}
           </div>}
         </section>}
-        {profile.activeRequest && <section aria-labelledby="active-request-title">
+        {ridePage === 'RIDER' && profile.activeRequest && <section aria-labelledby="active-request-title">
           <h3 id="active-request-title">내 탑승 요청</h3>
           <p>{profile.activeRequest.driverNickname} · {profile.activeRequest.originName} → {profile.activeRequest.destinationName}</p>
           <p>희망 출발 {new Date(profile.activeRequest.desiredDepartureAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })} · 상태 {profile.activeRequest.status}</p>
@@ -963,45 +1004,41 @@ function App() {
           </li>)}</ul> : <p>차단한 사용자가 없습니다.</p>}
           <p>차단을 해제해도 종료된 요청이나 운행은 다시 열리지 않습니다.</p>
         </section>}
-        {waitingPoint && <section aria-labelledby="waiting-point-title">
+        {waitingPoint && profile.activeActivity?.role === (ridePage === 'DRIVER' ? 'DRIVER' : 'RIDER') && <section aria-labelledby="waiting-point-title">
           <h3 id="waiting-point-title">선택한 승차 지점에서 대기</h3>
           <p>대기 장소: <strong>{waitingPoint}</strong></p>
           <p>실시간 위치를 수집하거나 서로의 좌표를 공유하지 않습니다. 운전자와 탑승자는 이 승차 지점에서 만나고, 현장에서 탑승 코드를 확인합니다. 앱은 도착 여부를 추적하거나 자동으로 판정하지 않습니다.</p>
         </section>}
-        {canRequestRide && !profile.activeActivity && <section aria-labelledby="request-ride-title">
-          <h3 id="request-ride-title">운행 검색</h3>
-          <form onSubmit={(event) => { event.preventDefault(); void searchTrips(new FormData(event.currentTarget)); }}>
+        {ridePage === 'RIDER' && ridePosting && <section aria-labelledby="ride-posting-title">
+          <h3 id="ride-posting-title">운전자 선택 대기</h3>
+          <p>{ridePosting.originName} → {ridePosting.destinationName}</p>
+          <p>희망 출발 {new Date(ridePosting.desiredDepartureAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })} · 출발 시각까지 운전자를 기다립니다.</p>
+          <p>운전자가 선택하면 탑승이 확정되고 차량 정보와 탑승 코드가 열립니다.</p>
+          <button type="button" disabled={actionBusy} onClick={() => void cancelRidePosting(ridePosting)}>탑승 희망 취소</button>
+        </section>}
+        {ridePage === 'RIDER' && canPostRide && <section aria-labelledby="request-ride-title">
+          <h3 id="request-ride-title">탑승 희망 등록</h3>
+          <p>승차 지점과 희망 시각을 올리면 승인된 운전자가 골라 탑승을 확정합니다.</p>
+          <form onSubmit={(event) => { event.preventDefault(); void createRidePosting(new FormData(event.currentTarget)); }}>
             <label>대기할 승차 지점·목적지 <select name="routeId" value={searchRouteId} onChange={(event) => setSearchRouteId(event.currentTarget.value)} required>
               <option value="" disabled>승차 지점과 목적지를 선택해 주세요</option>
               {routes.map((route) => <option key={route.id} value={route.id}>{route.originName} → {route.destinationName}</option>)}
             </select></label>
             <label>희망 출발 시각 (한국 시간) <input name="desiredDepartureAt" type="datetime-local"
-              min={seoulDateTimeInput(Date.now())} max={seoulDateTimeInput(Date.now() + 30 * 60_000)}
+              min={desiredDepartureMin} max={desiredDepartureMax}
               defaultValue={seoulDateTimeInput(Date.now() + 5 * 60_000)} required /></label>
             <label>성별 조건 <select name="genderFilter" defaultValue="ANY">
               <option value="ANY">제한 없음</option>
               {profile.gender !== 'UNDISCLOSED' && <><option value="MAN">남성</option><option value="WOMAN">여성</option><option value="SAME_AS_ME">나와 같음</option></>}
             </select></label>
             <label><input name="preferSameDepartment" type="checkbox" /> 같은 학과 우선</label>
-            <button type="submit" disabled={searchBusy || !routes.length}>운행 찾기</button>
+            <button type="submit" disabled={postingBusy || !routes.length}>탑승 희망 등록</button>
           </form>
-          {tripMatches.length > 0 && <ul aria-label="추천 운행">
-            {tripMatches.map((trip) => <li key={trip.id}>
-              <p>{trip.driverNickname} · {trip.originName} → {trip.destinationName}</p>
-              <p>출발 {new Date(trip.departureAt).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul' })}
-                · 남은 좌석 {trip.remainingSeats}석 · 성별 조건 {trip.genderFilter}</p>
-              <p>추천 이유: {trip.matchReasons.map((reason) => reason === 'SAME_DEPARTMENT' ? '검증된 같은 학과' : '출발 시각이 가까움').join(' · ')}</p>
-              <button type="button" disabled={actionBusy || trip.remainingSeats < 1} onClick={() => void requestMatch(trip)}>탑승 요청</button>
-            </li>)}
-          </ul>}
-          {searchCursor && searchFilters && <button type="button" disabled={searchBusy}
-            onClick={() => void loadTrips(searchFilters, searchCursor)}>더 보기</button>}
-          {searchBusy && <p role="status">운행을 찾고 있습니다.</p>}
-          {!routes.length && <p>검색할 수 있는 노선이 없습니다.</p>}
+          {!routes.length && <p>등록할 수 있는 노선이 없습니다.</p>}
         </section>}
-        {profile.affiliation.status === 'VERIFIED' && <>
+        {ridePage === 'DRIVER' && profile.affiliation.status === 'VERIFIED' && <>
           <h3>운전자 차량 등록</h3>
-          <p>차량 정보는 본인과 승인 운영자만 볼 수 있습니다. 등록만으로 승인이 되지 않으며, 승인된 차량만 운행에 사용할 수 있습니다.</p>
+          <p>차량 정보는 본인과 승인 운영자만 볼 수 있습니다. 등록만으로 승인이 되지 않으며, 승인 차량만 탑승 희망을 선택할 수 있습니다.</p>
           <form action={(form) => { void updateDriverProfile(form); }}>
             <label>차량 모델 <input name="vehicleModel" defaultValue={profile.driverProfile?.vehicleModel ?? ''} maxLength={80} required /></label>
             <label>차량 색상 <input name="vehicleColor" defaultValue={profile.driverProfile?.vehicleColor ?? ''} maxLength={30} required /></label>
@@ -1012,33 +1049,22 @@ function App() {
             <button type="submit" disabled={!canRegisterDriver}>차량 정보 저장</button>
           </form>
         </>}
-        {canCreateTrip && <>
-          <h3>운행 등록</h3>
-          <p>출발은 지금부터 30분 이내로 선택해 주세요. 모집은 출발 시각부터 15분 후 마감됩니다.</p>
-          {routes.length ? <form onSubmit={(event) => {
-            event.preventDefault();
-            void createTrip(new FormData(event.currentTarget));
-          }}>
-            <label>승차 지점·목적지 <select name="routeId" defaultValue="" required>
-              <option value="" disabled>승차 지점과 목적지를 선택해 주세요</option>
-              {routes.map((route) => <option key={route.id} value={route.id}>{route.originName} → {route.destinationName}</option>)}
-            </select></label>
-            <label>출발 시각 (한국 시간) <input name="departureAt" type="datetime-local" min={tripDepartureMin} max={tripDepartureMax} required /></label>
-            <label>동승 정원 <select name="seatCapacity" defaultValue={Math.min(2, profile.driverProfile!.passengerCapacity)}>
-              {Array.from({ length: profile.driverProfile!.passengerCapacity }, (_, index) => index + 1)
-                .map((capacity) => <option key={capacity} value={capacity}>{capacity}명</option>)}
-            </select></label>
-            <label>성별 조건 <select name="genderFilter" defaultValue="ANY">
-              <option value="ANY">제한 없음</option>
-              {profile.gender !== 'UNDISCLOSED' && <>
-                <option value="MAN">남성</option><option value="WOMAN">여성</option><option value="SAME_AS_ME">나와 같음</option>
-              </>}
-            </select></label>
-            <label><input name="preferSameDepartment" type="checkbox" /> 같은 학과 우선</label>
-            <button type="submit" disabled={tripBusy || !routes.length}>운행 등록</button>
-          </form> : <p>등록할 수 있는 노선이 없습니다.</p>}
-        </>}
-        {profile.activeActivity?.role === 'RIDER' && <p>탑승 요청이 진행 중입니다. 종료 후 운행을 등록할 수 있습니다.</p>}
+        {ridePage === 'DRIVER' && <section aria-labelledby="ride-postings-list-title">
+          <h3 id="ride-postings-list-title">탑승 희망 선택</h3>
+          {!driverVerified && <p>차량 등록과 운영자 승인이 완료되면 탑승 희망을 볼 수 있습니다.</p>}
+          {driverVerified && !canSelectPosting && profile.activeActivity?.role === 'RIDER'
+            && <p>탑승자 활동이 끝난 뒤 탑승 희망을 선택할 수 있습니다.</p>}
+          {driverVerified && canSelectPosting && ridePostingList.length > 0
+            ? <ul aria-label="탑승 희망 목록">{ridePostingList.map((posting) => <li key={posting.id}>
+              <p>{posting.riderNickname} · {posting.originName} → {posting.destinationName}</p>
+              <p>희망 출발 {new Date(posting.desiredDepartureAt).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul' })}
+                {posting.sameDepartment ? ' · 같은 학과' : ''}</p>
+              {!posting.conditionsCompatible && <p role="status">현재 운행 구성원의 성별 조건과 맞지 않습니다.</p>}
+              <button type="button" disabled={actionBusy || !posting.conditionsCompatible || !canSelectPosting}
+                onClick={() => void mutate(`/api/v1/ride-postings/${posting.id}/accept`, {}, '탑승 희망을 선택했습니다. 탑승이 확정됐습니다.')}>선택 및 수락</button>
+            </li>)}</ul>
+            : driverVerified && canSelectPosting && <p role="status">선택할 수 있는 탑승 희망이 없습니다.</p>}
+        </section>}
         <section aria-labelledby="account-deletion-title">
           <h3 id="account-deletion-title">계정 탈퇴</h3>
           <p>탈퇴는 최근 로그인 후 5분 안에 요청해야 합니다. 진행 중 활동을 종료하고 프로필·로그인 식별 정보와 차량 정보를 제거합니다. 관련 운행·신고·동의·감사 기록과 D1 백업 사본은 즉시 삭제되지 않을 수 있으며 보관기간은 아직 확정되지 않았습니다.</p>
@@ -1048,9 +1074,11 @@ function App() {
       </> : <>
         <p>{import.meta.env.DEV
           ? '학교 정보가 확인되지 않아 원격 Google 로그인을 사용할 수 없습니다. 로컬 개발은 준비된 합성 계정만 제공합니다.'
-          : import.meta.env.VITE_STAGING_AUTH_TEST_ONLY === 'true'
-            ? '현재 staging은 학교 Google 계정 확인 전용입니다. 로그인 결과만 보여주며 앱 계정·세션은 만들지 않고 나머지 API는 닫혀 있습니다.'
-            : '학교 Google 계정으로 로그인합니다. 현재 이메일 도메인과 Google Workspace 조직을 함께 확인합니다.'}</p>
+          : import.meta.env.VITE_STAGING_TEST_API_ENABLED === 'true'
+            ? '임시 staging 테스트 중입니다. Google 계정 확인 후 지정된 두 계정만 앱 API를 사용할 수 있습니다.'
+            : import.meta.env.VITE_STAGING_AUTH_TEST_ONLY === 'true'
+              ? '현재 staging은 학교 Google 계정 확인 전용입니다. 로그인 결과만 보여주며 앱 계정·세션은 만들지 않고 나머지 API는 닫혀 있습니다.'
+              : '학교 Google 계정으로 로그인합니다. 현재 이메일 도메인과 Google Workspace 조직을 함께 확인합니다.'}</p>
         {import.meta.env.DEV && <div className="actions">
           <button type="button" onClick={() => void login('driver')}>가상 운전자</button>
           <button type="button" onClick={() => void login('rider')}>가상 탑승자</button>
@@ -1059,7 +1087,6 @@ function App() {
         </div>}
         <a href="/api/v1/auth/google/start">학교 Google 로그인</a>
       </>}
-      <p aria-live="polite">{message}</p>
     </section>
   </main>;
 }

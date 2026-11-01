@@ -1,8 +1,8 @@
 # 교내 동승 매칭 웹앱 — Architecture
 
-문서 버전: 0.9 · 기준일: 2026-10-31 · 상태: 2026-10-31 사용자 결정으로 실시간 위치 공유를 중단하고 등록 승차 지점을 선택해 기다리는 흐름으로 변경했다. 브라우저 Geolocation을 호출하지 않고 Worker 위치 라우트와 지도 SDK 런타임을 제거했으며 지도 SDK CSP 허용도 없다. 위치정보법 분류·신고와 고정 지점 선택의 법적 취급은 미확정이며 법률 준수·면제 판단이 아니다. 구형 위치 테이블·migration 및 local/staging/복구 사본의 정리 여부는 미완료다. 학교 공식 승인·책임자 지정, 국외처리 상세, 외부 권한대장·복구 훈련도 미완료다. staging은 OIDC 계정 검증 전용(사용자·세션 생성 없음)이며 일반 API는 차단한다.
+문서 버전: 0.9 · 기준일: 2026-10-31 · 상태: 2026-10-31 사용자 결정으로 실시간 위치 공유를 중단하고 등록 승차 지점을 선택해 기다리는 흐름으로 변경했다. 브라우저 Geolocation을 호출하지 않고 Worker 위치 라우트와 지도 SDK 런타임을 제거했으며 지도 SDK CSP 허용도 없다. 위치정보법 분류·신고와 고정 지점 선택의 법적 취급은 미확정이며 법률 준수·면제 판단이 아니다. 구형 위치 테이블·migration 및 local/staging/복구 사본의 정리 여부는 미완료다. 학교 공식 승인·책임자 지정, 국외처리 상세, 외부 권한대장·복구 훈련도 미완료다. staging 일반 API는 기본 auth-only로 차단한다. 사용자 요청 시 허용목록에 등록한 두 계정만, 최대 4시간 동안 쓰는 임시 staging API test mode를 별도로 제공하며 현재 기본 설정은 비활성이다.
 
-제품 범위는 [Project.md](Project.md), 작업 순서는 [Roadmap.md](Roadmap.md), 에이전트 지침은 [AGENTS.md](AGENTS.md)를 따른다. 현재 만남 흐름은 운영자가 등록한 노선의 출발 지점을 선택해 현장에서 대기하고 탑승 코드로 확인하는 방식이다. legacy 위치 테이블·migration과 데이터 보존·삭제 검토는 남아 있지만 위치 API 및 지도 런타임은 제거했다. 현재 런타임 동작은 §8, 과거 구현 기록은 §21~22를 참고한다.
+제품 범위는 [Project.md](Project.md), 작업 순서는 [Roadmap.md](Roadmap.md), 에이전트 지침은 [AGENTS.md](AGENTS.md)를 따른다. 탑승자가 활성 노선과 희망 시각을 게시하고, 승인 운전자가 골라 수락하면 기존 운행·탑승 상태 머신으로 전환한다. 만남은 선택한 승차 지점에서 기다리고 탑승 코드로 확인한다. legacy 위치 테이블·migration과 데이터 보존·삭제 검토는 남아 있지만 위치 API 및 지도 런타임은 제거했다. 현재 런타임 동작은 §8, 과거 구현 기록은 §21~22를 참고한다.
 
 ## 1. 시스템 구성
 
@@ -64,7 +64,7 @@ Wrangler 구성 골격은 다음과 같다. 실제 ID·학교 설정·환경은 
 }
 ```
 
-`compatibility_date`는 실제 개발 시 지원 여부를 확인해 고정한다. 실제 dev 서버 포트도 `APP_ORIGIN`과 맞춘다. staging·production은 별도 Worker·D1·Google OAuth client·Secrets를 사용한다. staging은 `STAGING_AUTH_TEST_ONLY=true`일 때 Google start/callback만 허용한다. callback은 OIDC와 `gachon.ac.kr` 이메일·Workspace `hd`를 검증하되 사용자·학생확인·세션을 만들지 않는다. 모든 다른 `/api/*`는 503이며 `SCHOOL_CONFIG_READY=false`, `ALLOW_DEV_AUTH=false`를 유지한다. 실제 학교 계정 claim과 정책·운영 설정을 확인하기 전에는 normal API를 열지 않는다. 준비 후에도 자격은 학적이 아니라 인증된 계정 보유 여부로 판정한다.
+`compatibility_date`는 실제 개발 시 지원 여부를 확인해 고정한다. 실제 dev 서버 포트도 `APP_ORIGIN`과 맞춘다. staging·production은 별도 Worker·D1·Google OAuth client·Secrets를 사용한다. staging 기본값은 `STAGING_AUTH_TEST_ONLY=true`, `STAGING_TEST_API_ENABLED=false`다. auth-only에서는 Google start/callback만 허용하며 callback은 OIDC와 `gachon.ac.kr` 이메일·Workspace `hd`를 검증하되 사용자·학생확인·세션을 만들지 않는다. 모든 다른 `/api/*`는 503이며 `SCHOOL_CONFIG_READY=false`, `ALLOW_DEV_AUTH=false`를 유지한다. 임시 test mode는 auth-only 보호 게이트를 유지한 상태에서 secret allowlist의 정확한 두 이메일만 callback으로 계정·세션을 만들고, 이후 모든 API 요청에서도 사용자 이메일을 재검증한다. 만료 시각은 현재 시각부터 최대 4시간이며 만료 뒤 요청은 다시 503이다. UI는 테스트용 확인이 실제 약관·개인정보 처리방침이 아님과 테스트 데이터·복구 사본 보유 가능성을 알린다. 이 모드는 normal API 준비·정책 게시·운영 승인이나 법적 검토를 대신하지 않으며 기본적으로 꺼 둔다.
 
 공식 근거: [Static Assets](https://developers.cloudflare.com/workers/static-assets/), [Wrangler assets 설정](https://developers.cloudflare.com/workers/wrangler/configuration/#assets), [Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/). `scheduled()` 실행 지연이나 일시 실패가 있어도 요청 시점의 만료 검증은 계속 작동해야 한다.
 
@@ -89,6 +89,7 @@ Google 토큰 검증 근거: [OpenID Connect](https://developers.google.com/iden
 - 기본 세션은 최대 7일, 유휴 만료는 24시간이다. 유휴 갱신 쓰기는 최대 15분에 한 번으로 제한한다.
 - 상태 변경은 정확한 Origin + 세션에 연결된 CSRF 토큰을 검증한다. CSRF 토큰은 별도 `CSRF_HMAC_KEY`로 세션 원문에 HMAC을 적용해 재생성 가능한 값으로 만들고, `/me` 등 인증된 same-origin 경로로 제공한다. 서버는 쿠키와 서버 키로 기대값을 재계산하고 상수 시간 비교를 사용한다. DB에 CSRF 해시만 둔 채 원문을 다시 읽어 올 수 있다고 가정하지 않는다.
 - 로그아웃·정지·자격 만료·탈퇴 시 기존 세션을 폐기한다. 자격 만료 학생의 다음 요청에는 학생 확인 재신청이 가능한 제한 세션을 발급한다. 운영자 변경은 감사 기록을 남긴다.
+- 기존 `ADMIN` 계정 재인증은 학생 확인 기록을 쓰지 않으며, 학생 자격 만료 처리는 `STUDENT` 세션에만 적용한다.
 - 인증·사용자별 응답은 `no-store`다. CORS는 기본 same-origin이며 임의 Origin을 허용하지 않는다.
 
 ### 3.3 계정 이용 자격과 학과 파싱
@@ -96,6 +97,8 @@ Google 토큰 검증 근거: [OpenID Connect](https://developers.google.com/iden
 사용자 결정에 따라 현재 재학생 여부를 별도로 심사하지 않고 정상 인증된 가천대학교 Google 계정의 소유자를 이용 자격으로 인정한다. Worker는 Google ID token의 서명·issuer·audience·만료·nonce, `email_verified`, `gachon.ac.kr` 이메일, 설정된 Workspace `hd`를 검증한 뒤 `SCHOOL_ASSERTION`을 기록하고 내부 계정을 `VERIFIED`로 표시한다. 이 정책은 해당 Workspace를 가진 교직원·졸업생도 허용한다. 앱 내부의 `STUDENT`와 `VERIFIED` 표시는 기능 접근용 상태이며 재학생·학적 확인 사실이 아니다. 자격 기간은 세션 최대 수명과 같은 7일이며 Google 재인증 시 갱신한다. 실제 학교 이메일·`hd` 규칙은 staging 검증 전까지 normal auth에 반영된 것으로 간주하지 않는다.
 
 실제 학교 계정 이용 시험은 `STAGING_AUTH_TEST_ONLY=true`인 닫힌 staging에서 수행한다. 이 모드는 start/callback 외 모든 API를 503으로 막고, callback은 검증 결과만 일반 문구로 보여준 뒤 OAuth 임시 상태를 삭제한다. 토큰·이메일·`sub`를 응답이나 앱 로그에 남기지 않고 D1에 사용자·확인·세션 행을 만들지 않는다. Workspace 계정 선택과 Google 동의는 사용자가 직접 한다.
+
+제한된 기술 검증은 `STAGING_TEST_API_ENABLED=true`와 두 이메일 secret 및 만료 시각이 모두 유효할 때만 가능하다. 허용되지 않은 Gachon 계정은 인증만 확인하고 앱 계정·세션을 만들지 않는다. 허용목록은 source/config/log에 두지 않으며, 만료 후 테스트 변수와 secret을 제거하고 auth-only 기본값으로 복구한다.
 
 학과 파서는 다음 계약을 가진다.
 
@@ -135,6 +138,7 @@ type DepartmentParseResult = {
 | `driver_profiles` | user_id, vehicle_model, vehicle_color, vehicle_identifier, passenger_capacity, verification_status, verified_until, checked_at | user_id PK/FK, 운전자 확인·차량 식별. 일반 목록에는 식별자 비공개 |
 | `trips` | id, driver_id, route_id, departure_at, expires_at, seat_capacity, gender_snapshot, gender_filter, department_id_snapshot, department_verified_snapshot, prefer_same_department, status, version, last_command_id, started_at, ended_at, created_at | seat_capacity 1~4 및 차량 정원 이하. 스냅샷·조건은 활동 중 고정 |
 | `ride_requests` | id, trip_id, rider_id, desired_departure_at, gender_snapshot, gender_filter, department_id_snapshot, department_verified_snapshot, prefer_same_department, status, expires_at, accepted_at, boarded_at, boarding_code_hash, boarding_code_expires_at, boarding_attempt_count, version, last_command_id, created_at | 상태별 타임스탬프, 짧은 수명 탑승 코드 해시 |
+| `ride_postings` | id, rider_id, route_id, desired_departure_at, expires_at, 매칭 조건 스냅샷, status, matched_trip_id, matched_request_id, matched_driver_id, version, last_command_id, created_at, updated_at | 한 탑승자당 OPEN/MATCHING 하나. 수락 시 기존 운행·탑승 레코드로 원자 전환 |
 | `active_user_locks` | user_id, role, trip_id, request_id, created_at | user_id PK, DRIVER는 trip_id만, RIDER는 request_id만. 한 사람의 동시 활동 방지 |
 | `latest_locations` | user_id, trip_id, request_id, lat, lng, accuracy_m, captured_at, received_at, expires_at, sequence | legacy 위치 공유 데이터. 새 런타임 경로는 쓰지 않음. 기존 행/복구 사본은 별도 검토 |
 | `location_disclosure_records` | id, owner_user_id, recipient_user_id, recipient_nickname, recipient_role, trip_id, request_id, sequence, purpose, requested_at, notice_acknowledged_at, position_delivered_at, post_notice_acknowledged_at | legacy 확인 자료 테이블. 새 런타임 경로는 쓰지 않음. 과거 자료 보유·삭제 근거 미확정 |
@@ -158,6 +162,9 @@ erDiagram
     USERS ||--o| DRIVER_PROFILES : registers
     USERS ||--o{ TRIPS : drives
     ROUTES ||--o{ TRIPS : defines
+    USERS ||--o{ RIDE_POSTINGS : posts
+    ROUTES ||--o{ RIDE_POSTINGS : requests
+    RIDE_POSTINGS ||--o| RIDE_REQUESTS : converts_to
     TRIPS ||--o{ RIDE_REQUESTS : receives
     USERS ||--o{ RIDE_REQUESTS : requests
     USERS ||--o| ACTIVE_USER_LOCKS : holds
@@ -171,6 +178,7 @@ erDiagram
 | `trips` | `(route_id, status, departure_at, id)`, `(driver_id, created_at)` |
 | `ride_requests` | `(trip_id, status, created_at, id)`, `(rider_id, created_at)`, `(status, expires_at)` |
 | `ride_requests` | UNIQUE(rider_id) WHERE status IN ('REQUESTED','ACCEPTED','BOARDED') |
+| `ride_postings` | `(status, expires_at, desired_departure_at, created_at, id)`, UNIQUE(rider_id) WHERE status IN ('OPEN','MATCHING') |
 | `trips` | UNIQUE(driver_id) WHERE status IN ('OPEN','IN_PROGRESS') |
 | `latest_locations`, `sessions`, `oauth_states`, `idempotency_keys`, `rate_limit_buckets` | `expires_at` |
 | `location_disclosure_records` | `COALESCE(position_delivered_at,requested_at,provided_at)` 6 calendar months before cleanup |
@@ -220,7 +228,7 @@ erDiagram
 
 잔여 좌석은 `seat_capacity - COUNT(ride_requests WHERE status IN ('ACCEPTED','BOARDED'))`로 계산한다. 별도 `remaining_seats` 캐시를 진실의 기준으로 두지 않는다. 모집 중에만 추가 수락하므로 출발 이후의 완료가 새 좌석을 만들지 않는다.
 
-운행 생성/요청 생성은 동일한 `active_user_locks.user_id` PK를 확보한다. 생성과 잠금 확보는 같은 DB batch에서 실행하고 충돌하면 전체 실패한다. 만료된 이전 요청이 잠금을 점유하면 먼저 동일 사용자의 만료 정리를 수행하고 재확인한다. 정리는 해당 리소스가 여전히 만료된 상태인지 조건부 갱신하여 수락과 경합해도 안전해야 한다.
+운행 생성/요청 생성은 동일한 `active_user_locks.user_id` PK를 확보한다. 생성과 잠금 확보는 같은 DB batch에서 실행하고 충돌하면 전체 실패한다. 탑승 희망은 별도 OPEN posting 잠금으로 중복을 막고, active lock 생성 trigger가 열린 게시와 다른 활동의 동시 보유를 막는다. 운전자의 수락 batch는 게시를 MATCHING으로 바꾼 뒤 trip 생성·request 생성·ACCEPTED 전이·MATCHED 기록을 원자적으로 수행한다. 만료된 이전 요청이 잠금을 점유하면 먼저 동일 사용자의 만료 정리를 수행하고 재확인한다. 정리는 해당 리소스가 여전히 만료된 상태인지 조건부 갱신하여 수락과 경합해도 안전해야 한다.
 
 ### 6.2 수락의 원자적 경계
 
@@ -255,7 +263,7 @@ trigger는 수락뿐 아니라 요청 생성의 상호 제약과 부적절한 �
 
 ## 8. 승차 지점 선택·대기
 
-운행 생성과 검색에서 `route_id`를 선택한다. 허용된 route는 운영자가 확인한 고정 origin stop과 destination stop을 연결하며, route_id가 동일해야 요청을 생성할 수 있다. 따라서 운전자와 탑승자가 선택하는 만남 장소는 해당 노선의 origin stop이다. 활성 활동 화면은 지점 이름만 보여주고 그 장소에서 직접 기다리도록 안내한다. 차량 도착·이용자 현장 도착은 추적하거나 자동 판정하지 않으며, 탑승은 현장에서 6자리 코드로 확인한다.
+탑승 희망 게시에서 `route_id`를 선택한다. 허용된 route는 운영자가 확인한 고정 origin stop과 destination stop을 연결하며, 운전자는 같은 노선의 게시만 수락할 수 있다. 따라서 운전자와 탑승자가 만나는 장소는 해당 노선의 origin stop이다. 활성 활동 화면은 지점 이름만 보여주고 그 장소에서 직접 기다리도록 안내한다. 차량 도착·이용자 현장 도착은 추적하거나 자동 판정하지 않으며, 탑승은 현장에서 6자리 코드로 확인한다.
 
 웹 클라이언트는 Geolocation API를 호출하지 않는다. 실시간 좌표 업로드·조회 API는 Worker에 등록하지 않아 기본 404이며, 지도 SDK도 로드하지 않는다. 고정 승차 지점 선택과 route/request의 연결 자체가 개인정보 또는 위치정보에 해당하는지는 실제 서비스의 목적·운영 형태에 따라 검토한다. 이 설계는 위치정보법상 사업 분류·신고, 개인정보 처리 근거 또는 법정 의무의 면제를 확정하지 않는다.
 
@@ -278,6 +286,11 @@ trigger는 수락뿐 아니라 요청 생성의 상호 제약과 부적절한 �
 | DELETE `/me` | 최근 5분 내 로그인 세션+CSRF | 본인 계정 탈퇴, 활동 종료·세션/위치 제거·직접 식별 정보 제거; 연결 이력·백업은 보관 정책에 따름 |
 | GET `/stops`, `/routes`, `/departments` | 없음 | 학교/캠퍼스별 활성 항목. route의 origin stop이 대기 지점 |
 | PUT `/me/driver-profile` | 차량·확인 체크 항목 | 본인 등록, 승인 상태는 서버가 관리 |
+| POST `/ride-postings` | routeId, desiredDepartureAt, genderFilter, preferSameDepartment, `Idempotency-Key` | 탑승자 희망 게시 생성 |
+| GET `/ride-postings/mine` | 없음 | 본인 OPEN 게시 상태 |
+| GET `/ride-postings` | 없음 | 승인 운전자에게 호환되는 게시 최대 50개 |
+| POST `/ride-postings/:postingId/accept` | `Idempotency-Key` | 운전자 수락, trip·ACCEPTED request·활동 잠금을 원자적으로 생성 |
+| POST `/ride-postings/:postingId/cancel` | expectedVersion, `Idempotency-Key` | 게시 소유자의 취소 |
 | GET `/trips` | routeId, desiredDepartureAt, genderFilter, preferSameDepartment, cursor | 자격·좌석·차단·양방향 성별 조건을 통과한 추천 목록, 최대 20개와 다음 커서 |
 | POST `/trips` | routeId, departureAt, seatCapacity, genderFilter, preferSameDepartment, `Idempotency-Key` | 운전자, OPEN 생성 |
 | GET `/trips/:tripId` | 없음 | OPEN 운행 일반 상세 또는 본인 운행 상세 DTO |
@@ -450,7 +463,7 @@ npm run build
 
 `GET /api/v1/me`는 본인 활동과 요약을 포함하고 `GET /api/v1/trips/:tripId`는 OPEN 미만료 운행의 제한된 상세 또는 본인 운행을 반환한다. `GET /trips/:tripId/requests`와 `GET /requests/:requestId`는 현재 관계와 권한을 확인해 필요한 정보만 반환한다. 차량 식별자는 요청이 ACCEPTED/BOARDED인 탑승자에게만 보인다. 좌표와 이메일은 응답에 포함되지 않는다. 요청·운행 수명주기와 만료 상태 전이는 §19, 추천 검색·정렬은 §20에 기록한다.
 
-화면은 탑승자가 조건별 운행 검색·요청·취소를 수행하고, 운전자는 운행 등록 및 요청함에서 수락·거절·탑승 확인·출발·완료·취소·중단을 수행한다. 승객은 요청 상태를 새로고침 후 복구하고 탑승 코드를 발급/재발급한다. 위치 공유 화면은 §21에 기록한다.
+이 섹션의 초기 UI는 탑승자가 운행을 검색하고 운전자가 생성하는 방식이었다. 현재 제품 UI는 §31의 탑승 희망 게시→운전자 선택 흐름을 사용한다. 기존 `/trips` 생성·검색 및 `/requests` 엔드포인트는 기존 데이터와 이전 클라이언트 호환용으로 유지하며, 새 화면은 사용하지 않는다.
 
 ### 18. P3 요청 생성과 역할 간 활동 잠금 (2026-10-27)
 
@@ -468,7 +481,7 @@ API는 요청 목록/상세, 수락·거절·취소·노쇼, 탑승 코드 발�
 
 Workers/D1 검증은 수락과 완료의 동일 키 재시도, 다른 본문 제한은 기존 API 테스트 범위, 20개 동시 수락 중 마지막 좌석 1개만 확보, 잘못된 코드 5회 후 잠금·재발급, reject/cancel/no-show/trip cancel/abort/complete와 잠금 해제를 확인한다. Cron은 접근 없는 만료 요청/운행, 위치·세션·OAuth state·멱등키·rate-limit 정리와 90분 초과 활동의 요청 전이·잠금 해제·`SYSTEM_TIMEOUT` 감사 이벤트를 검증한다. §20에 P4 회귀 검증을 기록한다. 실기기와 운영 계정은 남아 있다.
 
-## 20. P4 추천 검색과 일관된 매칭 조건 (2026-10-27)
+## 20. P4 기존 운행 검색 계약 (2026-10-27, 호환 API)
 
 `GET /api/v1/trips`는 현재 세션·동의·학생 자격을 확인하고, 같은 학교/캠퍼스·활성 노선·운전자 승인·열린 운행·시간 ±10분·좌석·활동 잠금·상호 차단을 D1 조회에서 필터링한다. 승객의 `ANY/MAN/WOMAN/SAME_AS_ME` 조건은 미공개 입력 제한을 거치고, 운전자·기존 수락/탑승자·신청자 각 쌍의 양방향 조건을 검사한다. `migrations/0010_request_group_eligibility.sql`은 이미 좌석을 확보한 동승자와 충돌하는 새 요청도 D1에서 거절한다. 수락 시의 최종 검증은 `0007` trigger가 계속 수행한다.
 
@@ -546,7 +559,7 @@ Workers/D1 통합 테스트는 비당사자·무CSRF 접수 거절, 신고 상�
 
 ## 27. P6 지점·노선 운영 1차 (2026-10-28)
 
-운영자 화면은 학교·캠퍼스에 묶인 지점을 등록·수정·비활성화하고, 활성 승차 지점에서 활성 목적지로 가는 노선을 등록하거나 비활성화한다. 지점 삭제 API는 제공하지 않는다. 공개 운행 검색은 현재 확인된 학생에게 활성 노선만 반환한다. 관리자 지점 목록은 좌표를 포함해 `no-store`로 제공하며 승인된 운영자에게만 열린다. local seed의 AI공학관·중앙도서관·반도체대학 좌표는 사용자가 제공한 Plus Code 셀 중심이다. 가상 교문·캠퍼스 좌표만 placeholder이며, 실좌표 입력은 현장 안전성이나 운영 승인을 뜻하지 않는다.
+운영자 화면은 학교·캠퍼스에 묶인 지점을 등록·수정·비활성화하고, 활성 승차 지점에서 활성 목적지로 가는 노선을 등록하거나 비활성화한다. 지점 삭제 API는 제공하지 않는다. 공개 운행 검색은 현재 확인된 학생에게 활성 노선만 반환한다. 관리자 지점 목록은 좌표를 포함해 `no-store`로 제공하며 승인된 운영자에게만 열린다. 2026-10-31 사용자가 제공한 세 Plus Code 셀 중심을 AI공학관·중앙도서관·반도체대학의 활성 `GATE`로 staging D1에 등록했다. 전체 흐름을 위한 staging 전용 목적지를 AI공학관 좌표에 추가하고 중앙도서관·반도체대학 출발 노선 2개를 활성화했다. 한 테스트 계정의 가짜 차량도 staging 기간에 한해 승인했다. 이 fixture들은 테스트 전용이며 실제 운행은 아직 없다. 좌표 입력은 현장 안전성이나 운영 승인을 뜻하지 않는다.
 
 `migrations/0015_admin_catalog.sql`은 변경을 `STOP_CREATED/UPDATED`, `ROUTE_CREATED/UPDATED` 감사 이벤트로만 적용하고, 직접 지점/노선 변경·삭제를 막는다. 학교·캠퍼스 범위는 현재 운영자 DB 관계에서 가져오며 요청자가 값을 지정하지 않는다. 노선은 올바른 종류와 활성 상태의 지점을 요구하고 동일 교문/목적지 중복을 거절한다. 연결된 운행이 `OPEN` 또는 `IN_PROGRESS`인 동안 지점 좌표/종류/활성 상태 및 노선 활성 상태 변경을 막는다. 로컬 전용 합성 seed에만 가상 운영자 로그인을 추가해 화면을 시험할 수 있다. 실제 학교 지점·좌표·노선 값은 제공되지 않아 생성하지 않는다.
 
@@ -570,4 +583,12 @@ Hono `secureHeaders`는 same-origin 기본 CSP를 사용하고 지도 SDK origin
 
 운영자 확인에 따르면 Workers 플랜은 Free다. Cloudflare 공식 문서상 2026-11-30까지 Free Workers Logs는 하루 200,000 이벤트 한도와 3일 보존을 제공한다. 2026-12-01부터 적용되는 Observability 무료 한도는 하루 0.5GB 수집과 7일 보존이며, 한도 도달 시 추가 과금 대신 신규 로그 수집이 중단된다. Paid는 별도 포함량과 초과 요금이 있다. staging Worker 설정은 observability/logs enabled, log head sampling 1, persist true, invocation_logs false, redact_query_string true다. Cron 요약 로그는 5분 주기이고 사용자 요청·좌표 등은 애플리케이션 로그에 쓰지 않는다. 실제 로그 사용량은 측정하지 않았다. 근거: [Wrangler observability configuration](https://developers.cloudflare.com/workers/wrangler/configuration/#observability), [Workers Logs pricing and retention](https://developers.cloudflare.com/workers/observability/logs/workers-logs/), [Observability pricing from 2026-12-01](https://developers.cloudflare.com/observability/pricing/).
 
-현재 D1 제한은 탑승 요청 생성 5회/분, 탑승 코드 발급 3회/분, 신고 접수 5회/시간이며 코드 검증은 요청당 5회 실패 시 잠근다. 위치 업로드 10회/분 제한은 과거 route 설정 기록이며 위치 route는 제거됐다. 제한 키에는 사용자 ID 대신 SHA-256 해시를 사용한다. Workers/D1 검증에 요청 생성·코드 발급·코드 시도·신고 한도 검사가 포함된다.
+현재 D1 제한은 탑승 희망 게시·수락 각각 5회/분, 기존 탑승 요청 생성 5회/분, 탑승 코드 발급 3회/분, 신고 접수 5회/시간이며 코드 검증은 요청당 5회 실패 시 잠근다. 위치 업로드 10회/분 제한은 과거 route 설정 기록이며 위치 route는 제거됐다. 제한 키에는 사용자 ID 대신 SHA-256 해시를 사용한다. Workers/D1 검증에 게시/요청 생성·코드 발급·코드 시도·신고 한도 검사가 포함된다.
+
+## 31. 탑승 희망 게시와 운전자 선택 (2026-10-31)
+
+현재 화면의 기본 흐름은 탑승자가 `POST /api/v1/ride-postings`로 활성 노선·희망 출발 시각·성별 조건·같은 학과 우선 여부를 등록하고, 승인 운전자가 `GET /api/v1/ride-postings`에서 골라 `POST /:postingId/accept`로 수락하는 방식이다. 희망 게시 만료 시각은 출발 희망 시각이며 한 탑승자는 OPEN/MATCHING 게시를 하나만 가질 수 있다. 공개 목록은 활성 학교 노선·운전자/탑승자 자격·차단·기존 운행 좌석·노선/시간 일치·양방향 성별 조건을 확인하고 최대 50개만 반환한다.
+
+수락 batch는 OPEN→MATCHING, 기존 운전 잠금이 없으면 차량 정원으로 `trips` 생성, `REQUESTED` request 생성, 동일 batch에서 `ACCEPTED` 전이, 게시 MATCHED 기록을 수행한다. 이미 운전자의 OPEN 운행이 있으면 같은 노선·10분 이내·좌석이 남은 경우에만 그 운행에 연결한다. 기존 D1 trigger가 계정 자격·전체 그룹 성별 조건·차단·좌석·활동 잠금을 다시 검사한다. `0021_ride_postings.sql`은 게시 중복과 다른 활동 동시 보유를 막고 MATCHED가 실제 ACCEPTED request/잠금과 연결되도록 검증한다. 조건 UPDATE가 0건이면 최종 MATCHED의 NOT NULL 제약이 batch 전체를 롤백한다.
+
+운전자가 첫 게시를 수락하면 탑승이 바로 확정되고, 이후 기존 차량 정보 접근·탑승 코드·현장 확인·출발·완료 화면을 사용한다. 차량 정원이 남으면 같은 운행에 추가 게시를 수락할 수 있다. 게시 취소·만료·계정 탈퇴 정리도 연결했다. 이전 운행 생성·검색·요청 API는 호환을 위해 유지하지만 새 화면에서는 사용하지 않는다. Worker/D1 및 브라우저 전체 여정은 검증 전까지 완료로 표시하지 않는다.

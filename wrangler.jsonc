@@ -80,6 +80,7 @@
 				"SCHOOL_CONFIG_READY": "false",
 				"ALLOW_DEV_AUTH": "false",
 				"STAGING_AUTH_TEST_ONLY": "true",
+				"STAGING_TEST_API_ENABLED": "false",
 				"SCHOOL_ID": "gachon-university",
 				"CAMPUS_ID": "gachon-global-campus",
 				"ALLOWED_EMAIL_DOMAINS": "gachon.ac.kr",

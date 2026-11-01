@@ -3,11 +3,12 @@ import { secureHeaders } from 'hono/secure-headers';
 import { bodyLimit } from 'hono/body-limit';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { z } from 'zod';
-import { consentPolicies, cookieName, cookieOptions, environmentSchema, type Bindings } from './env';
+import { consentPolicies, cookieName, cookieOptions, environmentSchema, isStagingTestEmailAllowed, stagingTestModeActive, type Bindings } from './env';
 import { adminAccessFailure, currentConsents, requiredConsentFailure } from './auth/access';
 import { registerCatalogRoutes } from './routes/catalog';
 import { registerModerationRoutes } from './routes/moderation';
 import { registerTripRoutes } from './routes/trips';
+import { registerRidePostingRoutes } from './routes/ride-postings';
 import { expireDriverTrip, expireRiderRequest, tripReadSql, type TripSummary } from './trip-commands';
 import type { AppEnv } from './types';
 import { clearSessionCookie, createSession, csrfToken, getSession, randomToken, sha256, verifyMutation, SESSION_MAX_AGE_MS } from './auth/session';
@@ -42,7 +43,15 @@ app.use('*', async (c, next) => {
   }
   if (c.env.STAGING_AUTH_TEST_ONLY === 'true'
     && !(c.req.method === 'GET' && ['/api/v1/auth/google/start', '/api/v1/auth/google/callback'].includes(c.req.path))) {
-    return c.json({ error: { code: 'SERVICE_TEMPORARILY_UNAVAILABLE', message: '학교 계정 로그인 검증 전용 staging입니다.' }, meta: { requestId: c.get('requestId') } }, 503);
+    if (!stagingTestModeActive(c.env)) {
+      return c.json({ error: { code: 'SERVICE_TEMPORARILY_UNAVAILABLE', message: '학교 계정 로그인 검증 전용 staging입니다.' }, meta: { requestId: c.get('requestId') } }, 503);
+    }
+    const session = await getSession(c);
+    const account = session && await c.env.DB.prepare("SELECT email FROM users WHERE id=? AND account_status='ACTIVE'")
+      .bind(session.session.userId).first<{ email: string }>();
+    if (!account || !isStagingTestEmailAllowed(c.env, account.email)) {
+      return c.json({ error: { code: 'SERVICE_TEMPORARILY_UNAVAILABLE', message: '허용된 임시 테스트 계정만 사용할 수 있습니다.' }, meta: { requestId: c.get('requestId') } }, 503);
+    }
   }
   await next();
 });
@@ -100,15 +109,18 @@ app.get('/api/v1/auth/google/callback', async (c) => {
   }
   try {
     const claims = await consumeAuthorizationResponse(c.env, c.env.DB, new URL(c.req.url), state, browserBinding);
-    if (c.env.STAGING_AUTH_TEST_ONLY === 'true') {
+    if (c.env.STAGING_AUTH_TEST_ONLY === 'true' && !isStagingTestEmailAllowed(c.env, claims.email)) {
       await c.env.DB.prepare('DELETE FROM oauth_states WHERE state_hash=?').bind(await sha256(state)).run();
       clearBrowserBinding();
-      return c.html(`<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>학교 계정 확인</title><main><h1>학교 계정 확인 성공</h1><p>Google이 확인한 이메일 도메인과 Workspace 도메인이 모두 gachon.ac.kr과 일치합니다.</p><p>검증 전용 로그인입니다. 계정·세션·학생 확인 기록은 만들지 않았고 staging API는 계속 닫혀 있습니다.</p><a href="/">로그인 화면으로 돌아가기</a></main></html>`);
+      const message = stagingTestModeActive(c.env)
+        ? 'Google 계정은 확인했지만 임시 테스트 허용목록에 없어 앱 계정이나 세션은 만들지 않았습니다.'
+        : '검증 전용 로그인입니다. 계정·세션·학생 확인 기록은 만들지 않았고 staging API는 계속 닫혀 있습니다.';
+      return c.html(`<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>학교 계정 확인</title><main><h1>학교 계정 확인 성공</h1><p>Google이 확인한 이메일 도메인과 Workspace 도메인이 모두 gachon.ac.kr과 일치합니다.</p><p>${message}</p><a href="/">로그인 화면으로 돌아가기</a></main></html>`);
     }
     const conflict = await c.env.DB.prepare('SELECT id FROM users WHERE email=? AND google_sub<>?').bind(claims.email, claims.subject).first();
     if (conflict) throw new Error('ACCOUNT_EMAIL_CONFLICT');
-    const existing = await c.env.DB.prepare('SELECT id,school_id AS schoolId,campus_id AS campusId,account_status AS accountStatus FROM users WHERE google_sub=?')
-      .bind(claims.subject).first<{ id: string; schoolId: string; campusId: string; accountStatus: string }>();
+    const existing = await c.env.DB.prepare('SELECT id,school_id AS schoolId,campus_id AS campusId,account_status AS accountStatus,role FROM users WHERE google_sub=?')
+      .bind(claims.subject).first<{ id: string; schoolId: string; campusId: string; accountStatus: string; role: string }>();
     if (existing && (existing.schoolId !== c.env.SCHOOL_ID || existing.campusId !== c.env.CAMPUS_ID || existing.accountStatus !== 'ACTIVE')) {
       throw new Error('ACCOUNT_NOT_ACTIVE_OR_OUT_OF_SCOPE');
     }
@@ -124,7 +136,7 @@ app.get('/api/v1/auth/google/callback', async (c) => {
         VALUES(?,?,?,?,?,?,?,?,?,?,'UNDISCLOSED','PENDING','ACTIVE','STUDENT',?,?)`)
         .bind(userId, claims.subject, c.env.SCHOOL_ID, c.env.CAMPUS_ID, claims.email, claims.name,
           claims.departmentCode, claims.departmentStatus, claims.departmentSource, claims.parserVersion, now, now)];
-    if (schoolAssertion) {
+    if (schoolAssertion && (!existing || existing.role === 'STUDENT')) {
       statements.push(c.env.DB.prepare(`INSERT INTO student_verifications
         (id,user_id,method,outcome,department_id,verified_at,valid_until,created_at)
         VALUES(?,?,'SCHOOL_ASSERTION','VERIFIED',?,?,?,?)`)
@@ -226,6 +238,7 @@ app.delete('/api/v1/me', async (c) => {
 registerCatalogRoutes(app);
 
 registerTripRoutes(app);
+registerRidePostingRoutes(app);
 
 app.put('/api/v1/me/driver-profile', async (c) => {
   const result = await getSession(c);

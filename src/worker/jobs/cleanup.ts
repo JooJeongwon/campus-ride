@@ -4,7 +4,7 @@ const BATCH_LIMIT = 100;
 const TRIP_LIMIT = 20;
 const SYSTEM_TIMEOUT_MS = 90 * 60_000;
 const DAY_MS = 86_400_000;
-export type CleanupStage = 'EXPIRE_STUDENTS' | 'EXPIRE_REQUESTS' | 'ABORT_TIMED_OUT_TRIPS' | 'EXPIRE_TRIPS' | 'DELETE_EXPIRED_ROWS';
+export type CleanupStage = 'EXPIRE_STUDENTS' | 'EXPIRE_REQUESTS' | 'EXPIRE_RIDE_POSTINGS' | 'ABORT_TIMED_OUT_TRIPS' | 'EXPIRE_TRIPS' | 'DELETE_EXPIRED_ROWS';
 
 async function deleteExpiredRows(db: D1Database, table: string, key: string, where: string, now: number) {
   const rows = await db.prepare(`SELECT ${key} AS id FROM ${table} WHERE ${where} LIMIT ${BATCH_LIMIT}`)
@@ -24,6 +24,18 @@ async function expireRequests(db: D1Database, now: number) {
   await db.prepare(`UPDATE ride_requests SET status='EXPIRED',version=version+1,
       updated_at=MAX(?,updated_at+1),last_command_id=?,boarding_code_hash=NULL,boarding_code_expires_at=NULL
     WHERE status='REQUESTED' AND expires_at<=? AND id IN (${ids.map(() => '?').join(',')})`)
+    .bind(now, crypto.randomUUID(), now, ...ids).run();
+}
+
+async function expireRidePostings(db: D1Database, now: number) {
+  const rows = await db.prepare(`SELECT id FROM ride_postings
+    WHERE status='OPEN' AND expires_at<=? ORDER BY expires_at,id LIMIT ${BATCH_LIMIT}`)
+    .bind(now).all<{ id: string }>();
+  if (!rows.results.length) return;
+  const ids = rows.results.map(({ id }) => id);
+  await db.prepare(`UPDATE ride_postings SET status='EXPIRED',version=version+1,
+      updated_at=MAX(?,updated_at+1),last_command_id=?
+    WHERE status='OPEN' AND expires_at<=? AND id IN (${ids.map(() => '?').join(',')})`)
     .bind(now, crypto.randomUUID(), now, ...ids).run();
 }
 
@@ -120,6 +132,17 @@ async function deleteClosedRequests(db: D1Database, cutoff: number) {
     .bind(...ids, cutoff).run();
 }
 
+async function deleteClosedRidePostings(db: D1Database, cutoff: number) {
+  const rows = await db.prepare(`SELECT id FROM ride_postings
+    WHERE status IN ('MATCHED','CANCELLED','EXPIRED') AND updated_at<=?
+    ORDER BY updated_at,id LIMIT ${BATCH_LIMIT}`).bind(cutoff).all<{ id: string }>();
+  if (!rows.results.length) return;
+  const ids = rows.results.map(({ id }) => id);
+  await db.prepare(`DELETE FROM ride_postings WHERE id IN (${ids.map(() => '?').join(',')})
+    AND status IN ('MATCHED','CANCELLED','EXPIRED') AND updated_at<=?`)
+    .bind(...ids, cutoff).run();
+}
+
 async function deleteClosedTrips(db: D1Database, cutoff: number) {
   const rows = await db.prepare(`SELECT t.id FROM trips t
     WHERE t.status IN ('COMPLETED','CANCELLED','EXPIRED','ABORTED') AND t.ended_at<=?
@@ -164,6 +187,7 @@ async function deleteExpiredAccountTombstones(db: D1Database, cutoff: number) {
       AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE b.blocker_id=u.id OR b.blocked_id=u.id)
       AND NOT EXISTS (SELECT 1 FROM trips t WHERE t.driver_id=u.id)
       AND NOT EXISTS (SELECT 1 FROM ride_requests rr WHERE rr.rider_id=u.id)
+      AND NOT EXISTS (SELECT 1 FROM ride_postings p WHERE p.rider_id=u.id)
       AND NOT EXISTS (SELECT 1 FROM reports r WHERE r.reporter_id=u.id OR r.reported_user_id=u.id OR r.assigned_to=u.id)
       AND NOT EXISTS (SELECT 1 FROM latest_locations l WHERE l.user_id=u.id)
       AND NOT EXISTS (SELECT 1 FROM location_disclosure_records d WHERE d.owner_user_id=u.id OR d.recipient_user_id=u.id)
@@ -182,8 +206,9 @@ async function deleteExpiredAccountTombstones(db: D1Database, cutoff: number) {
       db.prepare(`DELETE FROM users WHERE id=? AND account_status='DELETED'
         AND NOT EXISTS (SELECT 1 FROM reports WHERE reporter_id=? OR reported_user_id=? OR assigned_to=?)
         AND NOT EXISTS (SELECT 1 FROM trips WHERE driver_id=?)
-        AND NOT EXISTS (SELECT 1 FROM ride_requests WHERE rider_id=?)`)
-        .bind(id, id, id, id, id, id),
+        AND NOT EXISTS (SELECT 1 FROM ride_requests WHERE rider_id=?)
+        AND NOT EXISTS (SELECT 1 FROM ride_postings WHERE rider_id=?)`)
+        .bind(id, id, id, id, id, id, id),
     ]);
   }
 }
@@ -193,6 +218,8 @@ export async function cleanupExpiredData(db: D1Database, now = Date.now(), onSta
   await expireStudents(db, now);
   onStage('EXPIRE_REQUESTS');
   await expireRequests(db, now);
+  onStage('EXPIRE_RIDE_POSTINGS');
+  await expireRidePostings(db, now);
   onStage('ABORT_TIMED_OUT_TRIPS');
   await abortTimedOutTrips(db, now);
   onStage('EXPIRE_TRIPS');
@@ -214,6 +241,7 @@ export async function cleanupExpiredData(db: D1Database, now = Date.now(), onSta
   const statements = expired.filter((statement): statement is D1PreparedStatement => statement !== null);
   if (statements.length) await db.batch(statements);
   await deleteClosedReports(db, oneYearAgo);
+  await deleteClosedRidePostings(db, rideCutoff);
   await deleteClosedRequests(db, rideCutoff);
   await deleteClosedTrips(db, rideCutoff);
   await deleteExpiredAuditEvents(db, oneYearAgo);

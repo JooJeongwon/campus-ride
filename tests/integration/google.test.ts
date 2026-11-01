@@ -57,6 +57,7 @@ async function beginLogin(
   invalidSignature = false,
   departmentSource: 'EMAIL_LOCAL_PART' | 'GOOGLE_NAME' = 'EMAIL_LOCAL_PART',
   authTestOnly = false,
+  stagingTestApi = false,
 ) {
   const configuredEnv = {
     ...env,
@@ -65,6 +66,9 @@ async function beginLogin(
     SCHOOL_CONFIG_READY: authTestOnly ? 'false' : 'true',
     ALLOW_DEV_AUTH: authTestOnly ? 'false' : env.ALLOW_DEV_AUTH,
     STAGING_AUTH_TEST_ONLY: authTestOnly ? 'true' : 'false',
+    STAGING_TEST_API_ENABLED: stagingTestApi ? 'true' : 'false',
+    STAGING_TEST_EMAIL_ALLOWLIST: stagingTestApi ? 'allowed-one@gachon.ac.kr,allowed-two@gachon.ac.kr' : undefined,
+    STAGING_TEST_EXPIRES_AT: stagingTestApi ? String(Date.now() + 60 * 60 * 1000) : undefined,
     SCHOOL_ID: authTestOnly ? 'gachon-university' : 'synthetic-school',
     CAMPUS_ID: authTestOnly ? 'gachon-global-campus' : 'synthetic-campus',
     ALLOWED_EMAIL_DOMAINS: 'gachon.ac.kr',
@@ -77,6 +81,7 @@ async function beginLogin(
     GOOGLE_CLIENT_ID: clientId,
     GOOGLE_CLIENT_SECRET: 'local-ci-secret-that-is-not-a-credential',
     CSRF_HMAC_KEY: 'local-ci-csrf-key-that-is-long-enough-123',
+    BOARDING_HMAC_KEY: stagingTestApi ? 'local-ci-boarding-key-that-is-long-enough-123' : undefined,
     POLICY_TERMS_VERSION: authTestOnly ? undefined : 'terms-test-v1',
     POLICY_TERMS_URL: authTestOnly ? undefined : 'https://policy.school.edu/terms',
     POLICY_PRIVACY_VERSION: authTestOnly ? undefined : 'privacy-test-v1',
@@ -171,6 +176,40 @@ it('validates Google OIDC and immediately verifies a Gachon account with a bound
   }
 });
 
+it('lets an existing admin reauthenticate without running student eligibility expiry', async () => {
+  const userId = crypto.randomUUID();
+  const suffix = crypto.randomUUID().slice(0, 8);
+  const subject = `test-admin-${suffix}`;
+  const email = `test-admin-${suffix}@gachon.ac.kr`;
+  const now = Date.now();
+  await env.DB.prepare(`INSERT INTO users
+    (id,google_sub,school_id,campus_id,email,nickname,gender,affiliation_status,verified_until,created_at,updated_at,role)
+    VALUES(?,?,?,?,?,'테스트 운영자','UNDISCLOSED','VERIFIED',?,?,?,'ADMIN')`)
+    .bind(userId, subject, 'synthetic-school', 'synthetic-campus', email, now - 1000, now - 86400000, now - 86400000).run();
+  const flow = await beginLogin({ sub: subject, email, name: '테스트 운영자' });
+  try {
+    const callback = await flow.callback();
+    expect(callback.status).toBe(302);
+    const sessionCookie = callback.headers.get('Set-Cookie')?.match(/(?:__Host-)?campus_session=[^;,]+/)?.[0];
+    expect(sessionCookie).toBeTruthy();
+    const profile = await flow.profile(sessionCookie!);
+    expect(profile.status).toBe(200);
+    const profileData = await profile.json() as { data: { role: string } };
+    expect(profileData.data.role).toBe('ADMIN');
+    expect(await env.DB.prepare('SELECT id FROM student_verifications WHERE user_id=?').bind(userId).first()).toBeNull();
+    expect(await env.DB.prepare(`SELECT id FROM audit_events WHERE event_type='STUDENT_ELIGIBILITY_EXPIRED' AND resource_id=?`)
+      .bind(userId).first()).toBeNull();
+  } finally {
+    flow.close();
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM sessions WHERE user_id=?').bind(userId),
+      env.DB.prepare('DELETE FROM consents WHERE user_id=?').bind(userId),
+      env.DB.prepare('DELETE FROM student_verifications WHERE user_id=?').bind(userId),
+      env.DB.prepare('DELETE FROM users WHERE id=?').bind(userId),
+    ]);
+  }
+});
+
 it('verifies a real-account claim in closed staging without creating an app account or session', async () => {
   const flow = await beginLogin({}, false, 'EMAIL_LOCAL_PART', true);
   try {
@@ -190,6 +229,41 @@ it('verifies a real-account claim in closed staging without creating an app acco
     expect((await flow.request('/api/v1/auth/dev', { method: 'POST' })).status).toBe(503);
   } finally {
     flow.close();
+  }
+});
+
+it('opens temporary staging APIs only to the two allowlisted Google accounts', async () => {
+  const allowed = await beginLogin({ email: 'allowed-one@gachon.ac.kr' }, false, 'EMAIL_LOCAL_PART', true, true);
+  let allowedSubject = '';
+  try {
+    const callback = await allowed.callback();
+    expect(callback.status).toBe(302);
+    allowedSubject = allowed.tokenClaims.sub as string;
+    const sessionCookie = callback.headers.get('Set-Cookie')!.match(/(?:^|,\s*)__Host-campus_session=[^;,]+/)?.[0].replace(/^,\s*/, '');
+    expect(sessionCookie).toBeTruthy();
+    expect((await allowed.request('/api/v1/health')).status).toBe(503);
+    const authorizedHealth = await allowed.request('/api/v1/health', { headers: { Cookie: sessionCookie! } });
+    expect(authorizedHealth.status, await authorizedHealth.clone().text()).toBe(200);
+  } finally {
+    allowed.close();
+    const user = await env.DB.prepare('SELECT id FROM users WHERE google_sub=?').bind(allowedSubject).first<{ id: string }>();
+    if (user) await env.DB.batch([
+      env.DB.prepare('DELETE FROM sessions WHERE user_id=?').bind(user.id),
+      env.DB.prepare('DELETE FROM student_verifications WHERE user_id=?').bind(user.id),
+      env.DB.prepare('DELETE FROM consents WHERE user_id=?').bind(user.id),
+      env.DB.prepare('DELETE FROM users WHERE id=?').bind(user.id),
+    ]);
+  }
+
+  const denied = await beginLogin({ email: 'not-allowed@gachon.ac.kr' }, false, 'EMAIL_LOCAL_PART', true, true);
+  try {
+    const callback = await denied.callback();
+    expect(callback.status).toBe(200);
+    expect(await callback.text()).toContain('허용목록');
+    expect(await env.DB.prepare('SELECT id FROM users WHERE google_sub=?').bind(denied.tokenClaims.sub).first()).toBeNull();
+    expect((await denied.request('/api/v1/health')).status).toBe(503);
+  } finally {
+    denied.close();
   }
 });
 

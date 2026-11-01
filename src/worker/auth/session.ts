@@ -105,7 +105,7 @@ export async function getSession(c: AppContext): Promise<{ session: Session; tok
     WHERE s.token_hash=? AND s.revoked_at IS NULL AND s.expires_at>? AND u.account_status='ACTIVE'`)
     .bind(tokenHash, Date.now()).first<Session>();
   if (!session || Date.now() - session.lastSeenAt >= 24 * 60 * 60 * 1000) return null;
-  if (session.affiliationStatus === 'VERIFIED' && (session.verifiedUntil ?? 0) <= Date.now()) {
+  if (session.role === 'STUDENT' && session.affiliationStatus === 'VERIFIED' && (session.verifiedUntil ?? 0) <= Date.now()) {
     const now = Date.now();
     await expireStudentEligibility(c.env.DB, session.userId, now);
     return createReverificationSession(c, session, now);

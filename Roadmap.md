@@ -1,6 +1,6 @@
 # 교내 동승 매칭 웹앱 — Roadmap
 
-작성일: 2026-10-31 · 상태: **가천대학교 글로벌캠퍼스와 `gachon.ac.kr` 기준 확정; staging OIDC claim 확인 완료(일반 API 차단); 운영주체·운영팀·문의처는 사용자 지정. 2026-10-31 사용자 결정으로 실시간 좌표 공유를 제거하고 선택한 승차 지점에서 기다리는 방식으로 변경. 위치정보법상 사업 분류·신고와 고정 지점 선택의 법적 취급은 미확정이며 준수·면제 판단이 아님. 14세 미만 미대상은 제품 가정이며 로그인에서 연령을 검증하지 않음. 정책 초안은 미게시·미효력. 구형 위치 자료/백업, 학교 승인·위임, 국외 처리, staging 복구 검증이 미완료**
+작성일: 2026-10-31 · 상태: **가천대학교 글로벌캠퍼스와 `gachon.ac.kr` 기준 확정; 탑승자가 희망 노선·시각을 게시하고 승인 운전자가 선택하는 화면/API를 staging 배포했다. 사용자 요청으로 지정 두 계정의 임시 staging API를 2026-10-31 14:47–18:47 UTC 동안 재개했다. staging에서 게시·수락·코드 확인·탑승까지 됐으나 예정 출발 전 운행 중단으로 완료는 미검증이다. jwjoo 계정에 staging 전용 가상 차량을 승인했고, 일회성 검토자로 지정한 dbwls 계정은 즉시 STUDENT로 복구했다. 운영주체·운영팀·문의처는 사용자 지정. 실시간 좌표 공유를 제거하고 선택한 승차 지점에서 기다리는 방식으로 변경. 위치정보법상 사업 분류·신고와 고정 지점 선택의 법적 취급은 미확정이며 준수·면제 판단이 아님. 14세 미만 미대상은 제품 가정이며 로그인에서 연령을 검증하지 않음. 정책 초안은 미게시·미효력. 구형 위치 자료/백업, 학교 승인·위임, 국외 처리, staging 복구 검증이 미완료**
 
 이 문서는 [Project.md](Project.md)의 요구사항을 [Architecture.md](Architecture.md)의 구조로 구현하기 위한 순서다. [AGENTS.md](AGENTS.md)의 검증·보안·작업 규칙을 적용한다. 일정과 담당자는 팀 구성 후 정하며 아래 체크박스는 실제 완료 전까지 체크하지 않는다.
 
@@ -152,7 +152,7 @@ Google Auth Platform 콘솔: [campus-ride-gachon](https://console.cloud.google.c
 
 2026-10-31 사용자 결정: 기존 GPS 기반 실시간 위치 공유 대신 선택한 승차 지점에서 기다리는 방식으로 변경했다. 위치 제공 기능은 사용자 흐름과 API 등록에서 비활성화했다. 이 결정은 위치정보법 적용·면제 판단이 아니며, legacy data와 복구 사본의 삭제 여부는 미확정이다.
 
-2026-10-31: 사용자가 제공한 전체 Plus Code `8Q99F42G+HXF`(반도체대학), `8Q99F43J+2X2`(중앙도서관), `8Q99F44M+5RV`(AI공학관)를 각각 셀 중심 좌표로 변환해 local D1과 `fixtures/seed.sql`에 반영했다. 이는 위치 코드의 좌표 변환이며 현장 정차 안전성·운영 승인 확인은 아니다.
+2026-10-31 정정: 앞선 기록에서 local fixture 좌표가 모두 `0,0`이라고 한 것은 부정확했다. `fixtures/seed.sql`에는 세 Plus Code 중심이 감사 이벤트를 통해 반영돼 있고, `fixtures/school.json`만 합성 placeholder를 유지한다. 당시 staging D1에는 승차 지점·노선이 없었다.
 
 ## 8. P6 — 운영·신고·차단·보관
 
@@ -230,6 +230,28 @@ Google Auth Platform 콘솔: [campus-ride-gachon](https://console.cloud.google.c
 **완료 기준:** AC-01~AC-11, 핵심 E2E와 실제 모바일 시험이 통과한다. 성능 결과에는 실제 측정 환경·표본·실패율을 남기고 임의의 처리 성능을 주장하지 않는다. staging 배포 완료와 운영 공개 완료를 구분한다.
 
 2026-10-28: staging D1/Worker 기본 인프라·Google 검증 전용 설정이 연결되어 있고, auth-test-only는 로그인 시작/callback 외 API와 개발 인증을 503으로 막는다. 사용자가 직접 선택한 Google 계정 callback에서 `gachon.ac.kr` 이메일 도메인과 signed `hd`를 확인했으며 계정·세션은 만들지 않았다. 로컬 Chromium E2E 6개는 통과했지만 staging의 두 실제 계정 전체 흐름, 모바일, 부하, 복구 검증은 미완료다. staging 일반 API는 계속 닫혀 있다.
+
+2026-10-31 staging 검증 재확인: 읽기 전용으로 `/api/v1/health`, `/api/v1/auth/me`, `/api/v1/trips`가 모두 503 JSON을 반환해 auth-test-only 차단이 유지됨을 확인했다. D1은 migration 0019까지(19개), 0020 미적용이며 마지막 Worker 배포는 2026-10-28 08:48 UTC다. 현재 Worker 설정에는 `SCHOOL_CONFIG_READY=false`이며 약관·개인정보 처리방침 URL/버전과 `BOARDING_HMAC_KEY` binding이 없어 auth-only 플래그만 바꿔서는 일반 API를 사용할 수 없다. staging API·D1·배포는 변경하지 않았다. 격리된 로컬 복제본(별도 D1)에서 lint, typecheck, unit 21개, Workers/D1 integration 49개, E2E 6개, build가 통과했다. 로컬 통합 테스트는 20개 동시 마지막 좌석 수락, 멱등성, 차단, 노쇼 및 선택 지점 여정을 포함한다. staging 계정 여정은 API 차단과 미게시 정책/미승인 운영 게이트 때문에 실행하지 않았다. 실기기·원격 부하·복구 훈련은 여전히 미완료이며 P7 체크는 유지한다.
+
+2026-10-31 사용자 요청으로 임시 staging 검증은 정확히 두 계정만 허용하는 auth-only 예외로 구현했다. 허용 이메일은 Worker secret에만 두며 비허용 계정은 앱 사용자·세션을 만들지 않고, 모든 API 요청에서 허용 계정 여부를 재확인한다. 4시간 만료를 강제하고 테스트용 확인이 실제 약관/개인정보 처리방침이 아니며 staging 데이터·복구 사본에 남을 수 있음을 UI에 표시한다. lint/typecheck/unit 22개/integration 50개/E2E 6개/build가 로컬에서 통과했다. 같은 날 staging D1 migration 0020을 원격 적용하고 migration ledger와 추가 테이블을 확인했다. 사용자가 지정한 두 Gachon 계정만 포함한 Worker secret과 탑승 코드 키를 설정하고, `STAGING_TEST_API_ENABLED=true` 및 2026-10-31 11:59 UTC 만료로 Worker 버전 `dd1b5bb8-a28a-4373-99c5-428c598c731c`를 배포했다. OAuth 시작은 302, 무인증 `/api/v1/health`와 `/api/v1/trips`는 허용목록 세션 요구로 503임을 확인했다. D1 aggregate는 사용자 0, 관리자 0, 활성 노선 0, 활성 지점 0, 승인 운전자 0, 운행 0이다.
+
+2026-10-31 추가 사용자 결정 및 실행: 지정한 Gachon 계정 하나를 staging 테스트용 ADMIN으로 부여하고, 명시적으로 승인된 테스트 fixture를 staging D1에 둘 수 있도록 허용했다. 지정 계정은 Google OAuth로 생성된 기존 `STUDENT/ACTIVE/VERIFIED` 행을 조건부 UPDATE로 `ADMIN`으로 바꾸고 `STAGING_ADMIN_GRANTED` 감사 이벤트를 기록했다. 이 권한은 테스트 종료 후 회수하며 production/학교 공식 위임으로 취급하지 않는다. 후속 확인 당시 두 계정은 각각 `ADMIN`과 `STUDENT`이고, ADMIN 계정은 유효 세션이 없어 재로그인이 필요했다. 당시 ADMIN에만 테스트 동의 2건이 있었고, staging D1에는 stop·route·승인 driver profile·trip/request가 없었다. 이 시점의 local seed 좌표는 위 정정에 적은 대로 이미 Plus Code 중심이었다.
+
+2026-10-31 사용자 요청으로 세 Plus Code를 Google Open Location Code 규격의 셀 중심으로 디코드하고 왕복 인코딩을 자체 검증했다. 활성 `GATE` 3개를 staging D1에 `STOP_CREATED` 감사 이벤트를 통해 추가했으며, read-after-write에서 감사 기록과 DB 좌표를 확인했다: AI공학관 `37.4554875, 127.134546875`, 중앙도서관 `37.4525125, 127.132390625`, 반도체대학 `37.4514375, 127.127421875`. 당시에는 활성 목적지·노선·승인 운전자·운행·요청이 0이었다. 사용자가 승인한 ADMIN→STUDENT 임시 전환은 관리자 설정·운전자 승인 이후로 두었다.
+
+2026-10-31 후속 staging 준비: 기존 ADMIN이 Google 재로그인 시 학생 전용 `SCHOOL_ASSERTION` 확인 행을 쓰려다 DB trigger에서 거절되고, 만료된 학생 자격 처리도 ADMIN에 적용되던 문제를 수정했다. 회귀 테스트를 추가했고 integration 51개, typecheck, lint, build를 통과시킨 뒤 Worker `737edecc-14ee-40f3-9d5d-3d42d864f5a4`를 배포했다. 원격 Google 로그인 시작 GET은 302다. 실제 OAuth callback은 관리자 재로그인 후 확인해야 하며 현재 D1에 두 계정 모두 활성 세션이 없다. 사용자 제공 좌표로 세 승차 지점이 활성 상태이고, 테스트 전용 AI공학관 목적지와 중앙도서관·반도체대학 출발 노선 2개, 시험용 가짜 차량 승인 상태를 read-after-write로 확인했다. 현재 운행과 활동 잠금은 0이다. 임시 API 테스트 모드 만료는 2026-10-31 11:59 UTC이며, 실계정 두 명의 승차 요청→수락→탑승→완료 흐름은 관리자 재로그인 확인과 ADMIN→STUDENT 임시 전환 이후에 진행한다.
+
+2026-10-31 로그인 확인 및 역할 전환: 사용자가 ADMIN 계정으로 staging에 재로그인했고 D1에서 활성 세션 1개를 확인했다. 지정 운전자 계정의 `VERIFIED` 차량(정원 1, 시험 창 만료 시각까지 유효), 활성 노선 2개, 운행/활동 잠금 0을 다시 확인한 뒤, 사전 승인된 ADMIN→STUDENT 임시 전환을 조건부 UPDATE와 `STAGING_ADMIN_TEMPORARY_ROLE_SWITCHED` 감사 이벤트로 적용했다. read-after-write 결과 두 계정은 STUDENT이며 전환 계정 세션 1개가 유지된다. 실제 운행은 생성되지 않았다. 다음은 두 번째 계정 로그인 후 첫 계정은 새 역할을 읽도록 화면을 새로고침하고, 승차 요청·수락·탑승·완료를 UI/API 경로로 진행하는 것이다. 테스트 창은 2026-10-31 11:59 UTC에 만료되며 종료 후 ADMIN 권한을 복구한다.
+
+2026-10-31 검색 원인 및 UI 분리: 사용자가 두 계정 로그인 후 검색 결과를 찾지 못해 staging D1을 확인했다. 활성 노선은 2개였지만 `OPEN` 운행과 활성 요청은 0건이라 검색 결과가 없는 상태였다. 혼합 화면을 탑승자(검색·요청)와 운전자(차량·운행 관리) 화면으로 나누고, 검색 결과가 없을 때 운전자 화면에서 운행을 등록하라는 안내를 추가했다. 활동 중인 사용자는 해당 역할 화면을 우선 표시하며, 계정 변경 시 이전 검색 결과를 초기화한다. E2E 6개, typecheck, lint, build 통과 후 Worker `794e6cee-8730-4275-9f49-8051f0a552a0`로 staging 배포했다. 배포 후 정적 사이트/JS 200, 로그인 시작 302, 무세션 health 503(허용된 테스트 세션 필요)을 확인했다. D1에는 두 계정의 활성 세션이 각 1개지만 운행은 여전히 0건이므로 실제 매칭 흐름은 운전자 계정이 먼저 운행을 등록해야 시작된다. 임시 테스트 창은 11:59 UTC 만료, 종료 후 ADMIN 권한 복구 및 시험 fixture 정리가 남아 있다.
+
+2026-10-31 사용자 결정 완료: 탑승자가 노선·희망 시각·매칭 조건을 게시하고 승인 운전자가 목록에서 선택하면 기존 탑승/코드/출발/완료 흐름으로 이어진다. `ride_postings` D1/API, 역할별 화면, 통합/E2E 검증을 구현했다. migration 0021을 staging D1에 적용하고 Worker `1d413180-2dc2-48a5-9b54-cebbe9ee4703`를 배포했다. 로컬 통합 52개, E2E 6개, typecheck/lint/build가 통과했다. Staging은 랜딩 200, OAuth 시작 302, 무세션 posting/health API 503으로 확인했다. 지정한 두 계정의 임시 API 허용은 11:59 UTC에 만료됐다. 배포된 실제 두 계정 간 탑승 여정과 모바일·부하·복구 검증은 남아 있다.
+
+2026-10-31 사용자 승인에 따라 staging 전용 가상 차량(가상 차량·초록·SYNTHETIC-ONLY·정원 2명)을 jwjoo 계정에 추가했다. 현재 지정 ADMIN이 없는 상태라 dbwls 계정을 단일 차량 승인 검토자로 잠시 ADMIN 지정하고 `DRIVER_PROFILE_VERIFIED` 감사 이벤트를 남긴 뒤, 즉시 STUDENT로 복구했다. 역할 부여/복구도 별도 감사 이벤트로 기록했고 read-after-write에서 두 계정 모두 STUDENT, jwjoo 차량 VERIFIED, 활성 ADMIN 0을 확인했다. 차량 승인 유효기간은 jwjoo 학생 자격 만료 시각인 2026-11-07 10:55:21 UTC까지다. 임시 staging API 기간은 이미 11:59 UTC에 끝났으므로 새 API 시험을 하려면 별도 허가로 테스트 창을 다시 열어야 한다.
+
+2026-10-31 사용자 요청으로 staging API 시험을 다시 열었다. 기존 Worker secret의 지정 2계정 allowlist를 유지하고 `STAGING_TEST_API_ENABLED=true`, `STAGING_TEST_EXPIRES_AT=1793472427000`(2026-10-31 18:47 UTC, 최대 4시간)로 Worker `d365980e-9877-4468-a496-9d8083fe3030`를 배포했다. 두 계정의 세션·필수 동의와 jwjoo의 승인 차량을 read-only로 확인했다. 배포 후 랜딩 200, OAuth 시작 302, 무세션 health/posting API 503을 확인했다. 일반 익명 API는 계속 차단된다.
+
+2026-11-01 KST staging 흐름 진단: D1에서 탑승 게시→운전자 수락→탑승자 코드 발급→운전자 코드 확인 순으로 `BOARDED`까지 기록된 뒤, 예정 출발 00:16 KST보다 이른 00:12 KST에 운행이 `ABORTED`된 것을 확인했다. `started_at`이 비어 있고 운전자 요청의 `boarded_at`만 기록돼 있어 출발 전이 성립하지 않았다. 사용자가 말한 취소 반응은 D1에서 `CANCELLED`가 아닌 `ABORTED`로 확인됐다. 버튼이 예정 시각 전에 눌리지 않도록 비활성화하고, 출발 시각 안내 및 일반 작업 피드백을 화면 상단으로 옮겼다. typecheck/lint/build가 통과했고 Worker `76106c08-9b21-4a1b-937e-6c8ab7415fc1`로 staging 배포했다. 화면·JS 200, 무세션 API 503을 확인했다. 실제 로그인 상태의 재시도는 아직 하지 않았다.
 
 ## 10. P8 — 제한 파일럿과 공개 판단
 

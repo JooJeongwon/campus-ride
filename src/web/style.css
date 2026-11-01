@@ -6,6 +6,10 @@ h1 { font-size: clamp(2.5rem, 8vw, 4.5rem); line-height: 1.2; letter-spacing: -.
 h2 { font-size: 1.1rem; }
 section { margin-top: 3rem; padding: 1.5rem; border: 1px solid #ccd6ce; border-radius: 1rem; background: #fff; }
 .actions { display: flex; flex-wrap: wrap; gap: .75rem; margin: 1.5rem 0; }
+.ride-page-nav { display: flex; gap: .75rem; margin-top: 1.5rem; }
+.ride-page-nav button[aria-pressed="true"] { background: #183d32; color: #fff; }
+.ride-page-intro { margin-top: 2rem; }
+.ride-page-intro h2, .ride-page-intro p { margin: .25rem 0; }
 form { display: grid; gap: .75rem; margin: 1.5rem 0; }
 input, select, button { min-height: 2.75rem; font: inherit; }
 button { border: 1px solid #7d9888; border-radius: .5rem; padding: .35rem .8rem; background: #fff; color: #183d32; }

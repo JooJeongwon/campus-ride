@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { environmentSchema } from '../../src/worker/env';
+import { environmentSchema, isStagingTestEmailAllowed } from '../../src/worker/env';
 
 const local = { APP_ENV: 'development', APP_ORIGIN: 'http://localhost:8787', SCHOOL_CONFIG_READY: 'false', ALLOW_DEV_AUTH: 'false' };
 
@@ -54,6 +54,37 @@ it('requires paired HTTPS policy metadata and rejects placeholder links', () => 
     { ...policy, POLICY_PRIVACY_URL: 'https://policy.invalid/privacy' },
     { ...policy, POLICY_PRIVACY_VERSION: 'bad version' },
   ]) expect(environmentSchema.safeParse(value).success).toBe(false);
+});
+
+it('limits temporary staging API access to exactly two Gachon accounts until expiry', () => {
+  const expiresAt = Date.now() + 60 * 60 * 1000;
+  const stagingTest = {
+    APP_ENV: 'staging' as const,
+    APP_ORIGIN: 'https://campus-ride-staging.jwjoo0512.workers.dev',
+    SCHOOL_CONFIG_READY: 'false' as const,
+    ALLOW_DEV_AUTH: 'false' as const,
+    STAGING_AUTH_TEST_ONLY: 'true' as const,
+    STAGING_TEST_API_ENABLED: 'true' as const,
+    STAGING_TEST_EMAIL_ALLOWLIST: 'one@gachon.ac.kr,two@gachon.ac.kr',
+    STAGING_TEST_EXPIRES_AT: String(expiresAt),
+    SCHOOL_ID: 'gachon-university',
+    CAMPUS_ID: 'gachon-global-campus',
+    ALLOWED_EMAIL_DOMAINS: 'gachon.ac.kr',
+    ALLOWED_HOSTED_DOMAINS: 'gachon.ac.kr',
+    STUDENT_VERIFICATION_MODE: 'SCHOOL_ASSERTION' as const,
+    GOOGLE_CLIENT_ID: 'client.apps.googleusercontent.com',
+    GOOGLE_CLIENT_SECRET: 'local-ci-google-secret',
+    CSRF_HMAC_KEY: 'local-ci-csrf-key-that-is-long-enough-123',
+    BOARDING_HMAC_KEY: 'local-ci-boarding-key-that-is-long-enough-123',
+  };
+  expect(environmentSchema.safeParse(stagingTest).success).toBe(true);
+  expect(isStagingTestEmailAllowed(stagingTest, 'ONE@gachon.ac.kr')).toBe(true);
+  expect(isStagingTestEmailAllowed(stagingTest, 'third@gachon.ac.kr')).toBe(false);
+  expect(isStagingTestEmailAllowed({ ...stagingTest, STAGING_TEST_EXPIRES_AT: String(expiresAt) }, 'one@gachon.ac.kr', expiresAt)).toBe(false);
+  expect(environmentSchema.safeParse({ ...stagingTest, STAGING_TEST_EMAIL_ALLOWLIST: 'one@gachon.ac.kr,one@gachon.ac.kr' }).success).toBe(false);
+  expect(environmentSchema.safeParse({ ...stagingTest, STAGING_TEST_EMAIL_ALLOWLIST: 'one@gachon.ac.kr,other@example.com' }).success).toBe(false);
+  expect(environmentSchema.safeParse({ ...stagingTest, STAGING_TEST_EXPIRES_AT: String(Date.now() + 5 * 60 * 60 * 1000) }).success).toBe(false);
+  expect(environmentSchema.safeParse({ ...stagingTest, BOARDING_HMAC_KEY: undefined }).success).toBe(false);
 });
 
 it('blocks production deployment before any remote call', () => {

@@ -14,6 +14,17 @@ export const rideRequestCreateSchema = z.object({
   preferSameDepartment: z.boolean(),
 }).strict();
 
+export const ridePostingCreateSchema = z.object({
+  routeId: z.uuid(),
+  desiredDepartureAt: z.number().int().positive(),
+  genderFilter: z.enum(['ANY', 'MAN', 'WOMAN', 'SAME_AS_ME']),
+  preferSameDepartment: z.boolean(),
+}).strict();
+
+export const ridePostingCancelSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+}).strict();
+
 export const tripSearchSchema = z.object({
   routeId: z.uuid(),
   desiredDepartureAt: z.number().int().positive(),
